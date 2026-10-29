@@ -15,21 +15,23 @@ function addMonths(date, months) {
   return new Date(Date.UTC(y, m, Math.min(date.getUTCDate(), last)));
 }
 
-// Semi-annual fixed-coupon bond (US Treasury convention, actual/actual) priced
-// for a fixed settlement date. Returns a fast clean-price function of yield.
-export function makeBond(coupon, maturity, settle) {
+// Fixed-coupon bond (actual/actual, `freq` coupons a year: 2 for UST and BTP,
+// 1 for Bund and OAT) priced for a fixed settlement date.
+// Returns a fast clean-price function of yield.
+export function makeBond(coupon, maturity, settle, freq = 2) {
+  const step = 12 / freq;
   let k = 0;
-  while (addMonths(maturity, -6 * (k + 1)) > settle) k++;
-  const next = addMonths(maturity, -6 * k);
-  const prev = addMonths(maturity, -6 * (k + 1));
+  while (addMonths(maturity, -step * (k + 1)) > settle) k++;
+  const next = addMonths(maturity, -step * k);
+  const prev = addMonths(maturity, -step * (k + 1));
   const periodDays = (next - prev) / DAY;
   const w = (next - settle) / DAY / periodDays;
   const nFlows = k + 1;
-  const c = coupon * 100 / 2;
+  const c = coupon * 100 / freq;
   const accrued = c * (1 - w);
   // Coupons at w, w+1, ..., w+nFlows-1 periods from settlement; principal with the last.
   const price = (y) => {
-    const d = 1 / (1 + y / 2);
+    const d = 1 / (1 + y / freq);
     const annuity = Math.abs(1 - d) < 1e-12 ? nFlows : (1 - Math.pow(d, nFlows)) / (1 - d);
     return Math.pow(d, w) * (c * annuity + 100 * Math.pow(d, nFlows - 1)) - accrued;
   };
@@ -56,20 +58,21 @@ export function conversionFactor(coupon, maturity, firstDeliveryDay, roundMonths
   return Math.round((a * (coupon / 2 + cc + d) - b) * 10000) / 10000;
 }
 
-// Parse "name, coupon %, maturity, yield %, beta" lines.
+// Parse "name, coupon %, maturity, yield %, beta[, conversion factor]" lines.
 export function parseBasket(text) {
   return text
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => l && !l.startsWith("#"))
     .map((l) => {
-      const [name, cpn, mat, yld, beta] = l.split(",").map((s) => s.trim());
+      const [name, cpn, mat, yld, beta, cf] = l.split(",").map((s) => s.trim());
       return {
         name,
         coupon: Number(cpn) / 100,
         maturity: parseDate(mat),
         y0: Number(yld) / 100,
         beta: Number(beta),
+        cf: cf ? Number(cf) : null,
       };
     })
     .filter((b) => b.name && isFinite(b.coupon) && isFinite(b.y0) && isFinite(b.beta));
@@ -97,12 +100,21 @@ export function normals(n, seed = 1) {
   return out;
 }
 
-// Build the priced basket for a given contract setup.
-export function setup({ basket, analysisDate, deliveryDate, firstDeliveryDay, roundMonths }) {
+// Eurex-style conversion factor: clean price per 1 face at the notional coupon
+// yield on the delivery date. Used only when a bond has no published factor.
+export function eurexConversionFactor(coupon, maturity, deliveryDate, freq, notional = 0.06) {
+  return Math.round(makeBond(coupon, maturity, deliveryDate, freq).price(notional) * 1e4) / 1e6;
+}
+
+// Build the priced basket for a given contract setup. Bonds with a `cf` keep it;
+// otherwise the CME formula (cfMethod "cme") or the Eurex definition is used.
+export function setup({ basket, analysisDate, deliveryDate, firstDeliveryDay, roundMonths, freq = 2, cfMethod = "cme", notional = 0.06 }) {
   const T = Math.max((deliveryDate - analysisDate) / DAY / 365.25, 0);
   const bonds = basket.map((b) => {
-    const { price } = makeBond(b.coupon, b.maturity, deliveryDate);
-    const cf = conversionFactor(b.coupon, b.maturity, firstDeliveryDay, roundMonths);
+    const { price } = makeBond(b.coupon, b.maturity, deliveryDate, freq);
+    const cf = b.cf ?? (cfMethod === "cme"
+      ? conversionFactor(b.coupon, b.maturity, firstDeliveryDay, roundMonths)
+      : eurexConversionFactor(b.coupon, b.maturity, deliveryDate, freq, notional));
     const p0 = price(b.y0);
     const dv01 = (price(b.y0 - 0.0001) - price(b.y0 + 0.0001)) / 2;
     return { ...b, price, cf, p0, f0: p0 / cf, dv01 };

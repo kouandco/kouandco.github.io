@@ -1,0 +1,1368 @@
+{
+ "built": "2026-10-29",
+ "contracts": {
+  "TU": {
+   "market": "UST",
+   "name": "2-Year T-Note",
+   "currency": "$",
+   "face": 200000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 1,
+   "asOf": "2026-10-28",
+   "delivery": "2027-01-06",
+   "generic": "2 Yr par yield",
+   "vol": 87,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 3 3/8 09/15/28",
+     "id": "91282CNY3",
+     "coupon": 3.375,
+     "maturity": "2028-09-15",
+     "yield": 4.647,
+     "beta": 0.96
+    },
+    {
+     "name": "T 4 5/8 09/30/28",
+     "id": "91282CJA0",
+     "coupon": 4.625,
+     "maturity": "2028-09-30",
+     "yield": 4.655,
+     "beta": 0.98
+    },
+    {
+     "name": "T 4 3/4 09/30/28",
+     "id": "91282CRP8",
+     "coupon": 4.75,
+     "maturity": "2028-09-30",
+     "yield": 4.655,
+     "beta": 0.98
+    },
+    {
+     "name": "T 3 1/2 10/15/28",
+     "id": "91282CPC9",
+     "coupon": 3.5,
+     "maturity": "2028-10-15",
+     "yield": 4.663,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 7/8 10/31/28",
+     "id": "91282CJF9",
+     "coupon": 4.875,
+     "maturity": "2028-10-31",
+     "yield": 4.671,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 1/2 11/15/28",
+     "id": "91282CPK1",
+     "coupon": 3.5,
+     "maturity": "2028-11-15",
+     "yield": 4.677,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 3/8 11/30/28",
+     "id": "91282CJN2",
+     "coupon": 4.375,
+     "maturity": "2028-11-30",
+     "yield": 4.682,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 1/2 12/15/28",
+     "id": "91282CPP0",
+     "coupon": 3.5,
+     "maturity": "2028-12-15",
+     "yield": 4.687,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 3/4 12/31/28",
+     "id": "91282CJR3",
+     "coupon": 3.75,
+     "maturity": "2028-12-31",
+     "yield": 4.693,
+     "beta": 0.99
+    }
+   ]
+  },
+  "FV": {
+   "market": "UST",
+   "name": "5-Year T-Note",
+   "currency": "$",
+   "face": 100000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 1,
+   "asOf": "2026-10-28",
+   "delivery": "2027-01-06",
+   "generic": "5 Yr par yield",
+   "vol": 85,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 3 1/2 02/28/31",
+     "id": "91282CQD6",
+     "coupon": 3.5,
+     "maturity": "2031-02-28",
+     "yield": 4.833,
+     "beta": 0.98
+    },
+    {
+     "name": "T 3 7/8 03/31/31",
+     "id": "91282CQG9",
+     "coupon": 3.875,
+     "maturity": "2031-03-31",
+     "yield": 4.836,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 7/8 04/30/31",
+     "id": "91282CQK0",
+     "coupon": 3.875,
+     "maturity": "2031-04-30",
+     "yield": 4.838,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 1/8 05/31/31",
+     "id": "91282CQU8",
+     "coupon": 4.125,
+     "maturity": "2031-05-31",
+     "yield": 4.84,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 1/8 06/30/31",
+     "id": "91282CQX2",
+     "coupon": 4.125,
+     "maturity": "2031-06-30",
+     "yield": 4.842,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 3/8 07/31/31",
+     "id": "91282CRA1",
+     "coupon": 4.375,
+     "maturity": "2031-07-31",
+     "yield": 4.844,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 3/8 08/31/31",
+     "id": "91282CRK9",
+     "coupon": 4.375,
+     "maturity": "2031-08-31",
+     "yield": 4.846,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 09/30/31",
+     "id": "91282CRN3",
+     "coupon": 5.0,
+     "maturity": "2031-09-30",
+     "yield": 4.848,
+     "beta": 1.0
+    }
+   ]
+  },
+  "TY": {
+   "market": "UST",
+   "name": "10-Year T-Note",
+   "currency": "$",
+   "face": 100000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 3,
+   "asOf": "2026-10-28",
+   "delivery": "2026-12-31",
+   "generic": "10 Yr par yield",
+   "vol": 83,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 4 1/4 06/30/33",
+     "id": "91282CQW4",
+     "coupon": 4.25,
+     "maturity": "2033-06-30",
+     "yield": 4.934,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 3/8 07/31/33",
+     "id": "91282CRC7",
+     "coupon": 4.375,
+     "maturity": "2033-07-31",
+     "yield": 4.938,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 7/8 08/15/33",
+     "id": "91282CHT1",
+     "coupon": 3.875,
+     "maturity": "2033-08-15",
+     "yield": 4.94,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 1/2 08/31/33",
+     "id": "91282CRJ2",
+     "coupon": 4.5,
+     "maturity": "2033-08-31",
+     "yield": 4.942,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 09/30/33",
+     "id": "91282CRM5",
+     "coupon": 5.0,
+     "maturity": "2033-09-30",
+     "yield": 4.946,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 1/2 11/15/33",
+     "id": "91282CJJ1",
+     "coupon": 4.5,
+     "maturity": "2033-11-15",
+     "yield": 4.952,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 02/15/34",
+     "id": "91282CJZ5",
+     "coupon": 4.0,
+     "maturity": "2034-02-15",
+     "yield": 4.96,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 3/8 05/15/34",
+     "id": "91282CKQ3",
+     "coupon": 4.375,
+     "maturity": "2034-05-15",
+     "yield": 4.968,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 7/8 08/15/34",
+     "id": "91282CLF6",
+     "coupon": 3.875,
+     "maturity": "2034-08-15",
+     "yield": 4.977,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 1/4 11/15/34",
+     "id": "91282CLW9",
+     "coupon": 4.25,
+     "maturity": "2034-11-15",
+     "yield": 4.985,
+     "beta": 1.0
+    }
+   ]
+  },
+  "UXY": {
+   "market": "UST",
+   "name": "Ultra 10-Year T-Note",
+   "currency": "$",
+   "face": 100000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 3,
+   "asOf": "2026-10-28",
+   "delivery": "2026-12-31",
+   "generic": "10 Yr par yield",
+   "vol": 83,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 4 3/8 05/15/36",
+     "id": "91282CQQ7",
+     "coupon": 4.375,
+     "maturity": "2036-05-15",
+     "yield": 5.035,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 5/8 08/15/36",
+     "id": "91282CRF0",
+     "coupon": 4.625,
+     "maturity": "2036-08-15",
+     "yield": 5.043,
+     "beta": 1.0
+    }
+   ]
+  },
+  "US": {
+   "market": "UST",
+   "name": "T-Bond",
+   "currency": "$",
+   "face": 100000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 3,
+   "asOf": "2026-10-28",
+   "delivery": "2026-12-31",
+   "generic": "20 Yr par yield",
+   "vol": 81,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 2 3/8 02/15/42",
+     "id": "912810TF5",
+     "coupon": 2.375,
+     "maturity": "2042-02-15",
+     "yield": 5.241,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 1/8 02/15/42",
+     "id": "912810QU5",
+     "coupon": 3.125,
+     "maturity": "2042-02-15",
+     "yield": 5.241,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 05/15/42",
+     "id": "912810QW1",
+     "coupon": 3.0,
+     "maturity": "2042-05-15",
+     "yield": 5.25,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 1/4 05/15/42",
+     "id": "912810TH1",
+     "coupon": 3.25,
+     "maturity": "2042-05-15",
+     "yield": 5.25,
+     "beta": 0.99
+    },
+    {
+     "name": "T 2 3/4 08/15/42",
+     "id": "912810QX9",
+     "coupon": 2.75,
+     "maturity": "2042-08-15",
+     "yield": 5.259,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 3/8 08/15/42",
+     "id": "912810TK4",
+     "coupon": 3.375,
+     "maturity": "2042-08-15",
+     "yield": 5.259,
+     "beta": 0.99
+    },
+    {
+     "name": "T 2 3/4 11/15/42",
+     "id": "912810QY7",
+     "coupon": 2.75,
+     "maturity": "2042-11-15",
+     "yield": 5.268,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 11/15/42",
+     "id": "912810TM0",
+     "coupon": 4.0,
+     "maturity": "2042-11-15",
+     "yield": 5.268,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 1/8 02/15/43",
+     "id": "912810QZ4",
+     "coupon": 3.125,
+     "maturity": "2043-02-15",
+     "yield": 5.277,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 7/8 02/15/43",
+     "id": "912810TQ1",
+     "coupon": 3.875,
+     "maturity": "2043-02-15",
+     "yield": 5.277,
+     "beta": 0.99
+    },
+    {
+     "name": "T 2 7/8 05/15/43",
+     "id": "912810RB6",
+     "coupon": 2.875,
+     "maturity": "2043-05-15",
+     "yield": 5.286,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 7/8 05/15/43",
+     "id": "912810TS7",
+     "coupon": 3.875,
+     "maturity": "2043-05-15",
+     "yield": 5.286,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 5/8 08/15/43",
+     "id": "912810RC4",
+     "coupon": 3.625,
+     "maturity": "2043-08-15",
+     "yield": 5.295,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 3/8 08/15/43",
+     "id": "912810TU2",
+     "coupon": 4.375,
+     "maturity": "2043-08-15",
+     "yield": 5.295,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 3/4 11/15/43",
+     "id": "912810RD2",
+     "coupon": 3.75,
+     "maturity": "2043-11-15",
+     "yield": 5.304,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 3/4 11/15/43",
+     "id": "912810TW8",
+     "coupon": 4.75,
+     "maturity": "2043-11-15",
+     "yield": 5.304,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 5/8 02/15/44",
+     "id": "912810RE0",
+     "coupon": 3.625,
+     "maturity": "2044-02-15",
+     "yield": 5.313,
+     "beta": 0.99
+    },
+    {
+     "name": "T 4 1/2 02/15/44",
+     "id": "912810TZ1",
+     "coupon": 4.5,
+     "maturity": "2044-02-15",
+     "yield": 5.313,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 3/8 05/15/44",
+     "id": "912810RG5",
+     "coupon": 3.375,
+     "maturity": "2044-05-15",
+     "yield": 5.322,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 5/8 05/15/44",
+     "id": "912810UB2",
+     "coupon": 4.625,
+     "maturity": "2044-05-15",
+     "yield": 5.322,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 1/8 08/15/44",
+     "id": "912810RH3",
+     "coupon": 3.125,
+     "maturity": "2044-08-15",
+     "yield": 5.331,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 1/8 08/15/44",
+     "id": "912810UD8",
+     "coupon": 4.125,
+     "maturity": "2044-08-15",
+     "yield": 5.331,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 11/15/44",
+     "id": "912810RJ9",
+     "coupon": 3.0,
+     "maturity": "2044-11-15",
+     "yield": 5.34,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 5/8 11/15/44",
+     "id": "912810UF3",
+     "coupon": 4.625,
+     "maturity": "2044-11-15",
+     "yield": 5.34,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 1/2 02/15/45",
+     "id": "912810RK6",
+     "coupon": 2.5,
+     "maturity": "2045-02-15",
+     "yield": 5.349,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 3/4 02/15/45",
+     "id": "912810UJ5",
+     "coupon": 4.75,
+     "maturity": "2045-02-15",
+     "yield": 5.349,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 05/15/45",
+     "id": "912810RM2",
+     "coupon": 3.0,
+     "maturity": "2045-05-15",
+     "yield": 5.358,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 05/15/45",
+     "id": "912810UL0",
+     "coupon": 5.0,
+     "maturity": "2045-05-15",
+     "yield": 5.358,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 7/8 08/15/45",
+     "id": "912810RN0",
+     "coupon": 2.875,
+     "maturity": "2045-08-15",
+     "yield": 5.367,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 7/8 08/15/45",
+     "id": "912810UN6",
+     "coupon": 4.875,
+     "maturity": "2045-08-15",
+     "yield": 5.367,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 11/15/45",
+     "id": "912810RP5",
+     "coupon": 3.0,
+     "maturity": "2045-11-15",
+     "yield": 5.376,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 5/8 11/15/45",
+     "id": "912810UQ9",
+     "coupon": 4.625,
+     "maturity": "2045-11-15",
+     "yield": 5.376,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 1/2 02/15/46",
+     "id": "912810RQ3",
+     "coupon": 2.5,
+     "maturity": "2046-02-15",
+     "yield": 5.385,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 5/8 02/15/46",
+     "id": "912810UT3",
+     "coupon": 4.625,
+     "maturity": "2046-02-15",
+     "yield": 5.385,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 1/2 05/15/46",
+     "id": "912810RS9",
+     "coupon": 2.5,
+     "maturity": "2046-05-15",
+     "yield": 5.394,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 05/15/46",
+     "id": "912810UV8",
+     "coupon": 5.0,
+     "maturity": "2046-05-15",
+     "yield": 5.394,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 1/4 08/15/46",
+     "id": "912810RT7",
+     "coupon": 2.25,
+     "maturity": "2046-08-15",
+     "yield": 5.403,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 1/8 08/15/46",
+     "id": "912810UX4",
+     "coupon": 5.125,
+     "maturity": "2046-08-15",
+     "yield": 5.403,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 7/8 11/15/46",
+     "id": "912810RU4",
+     "coupon": 2.875,
+     "maturity": "2046-11-15",
+     "yield": 5.41,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 02/15/47",
+     "id": "912810RV2",
+     "coupon": 3.0,
+     "maturity": "2047-02-15",
+     "yield": 5.409,
+     "beta": 1.0
+    },
+    {
+     "name": "T 3 05/15/47",
+     "id": "912810RX8",
+     "coupon": 3.0,
+     "maturity": "2047-05-15",
+     "yield": 5.408,
+     "beta": 1.0
+    },
+    {
+     "name": "T 2 3/4 08/15/47",
+     "id": "912810RY6",
+     "coupon": 2.75,
+     "maturity": "2047-08-15",
+     "yield": 5.407,
+     "beta": 0.99
+    },
+    {
+     "name": "T 2 3/4 11/15/47",
+     "id": "912810RZ3",
+     "coupon": 2.75,
+     "maturity": "2047-11-15",
+     "yield": 5.406,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 02/15/48",
+     "id": "912810SA7",
+     "coupon": 3.0,
+     "maturity": "2048-02-15",
+     "yield": 5.405,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 1/8 05/15/48",
+     "id": "912810SC3",
+     "coupon": 3.125,
+     "maturity": "2048-05-15",
+     "yield": 5.404,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 08/15/48",
+     "id": "912810SD1",
+     "coupon": 3.0,
+     "maturity": "2048-08-15",
+     "yield": 5.403,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 3/8 11/15/48",
+     "id": "912810SE9",
+     "coupon": 3.375,
+     "maturity": "2048-11-15",
+     "yield": 5.402,
+     "beta": 0.99
+    },
+    {
+     "name": "T 3 02/15/49",
+     "id": "912810SF6",
+     "coupon": 3.0,
+     "maturity": "2049-02-15",
+     "yield": 5.401,
+     "beta": 0.98
+    },
+    {
+     "name": "T 2 7/8 05/15/49",
+     "id": "912810SH2",
+     "coupon": 2.875,
+     "maturity": "2049-05-15",
+     "yield": 5.4,
+     "beta": 0.98
+    },
+    {
+     "name": "T 2 1/4 08/15/49",
+     "id": "912810SJ8",
+     "coupon": 2.25,
+     "maturity": "2049-08-15",
+     "yield": 5.399,
+     "beta": 0.98
+    },
+    {
+     "name": "T 2 3/8 11/15/49",
+     "id": "912810SK5",
+     "coupon": 2.375,
+     "maturity": "2049-11-15",
+     "yield": 5.398,
+     "beta": 0.98
+    },
+    {
+     "name": "T 2 02/15/50",
+     "id": "912810SL3",
+     "coupon": 2.0,
+     "maturity": "2050-02-15",
+     "yield": 5.397,
+     "beta": 0.98
+    },
+    {
+     "name": "T 1 1/4 05/15/50",
+     "id": "912810SN9",
+     "coupon": 1.25,
+     "maturity": "2050-05-15",
+     "yield": 5.396,
+     "beta": 0.98
+    },
+    {
+     "name": "T 1 3/8 08/15/50",
+     "id": "912810SP4",
+     "coupon": 1.375,
+     "maturity": "2050-08-15",
+     "yield": 5.395,
+     "beta": 0.97
+    },
+    {
+     "name": "T 1 5/8 11/15/50",
+     "id": "912810SS8",
+     "coupon": 1.625,
+     "maturity": "2050-11-15",
+     "yield": 5.394,
+     "beta": 0.97
+    },
+    {
+     "name": "T 1 7/8 02/15/51",
+     "id": "912810SU3",
+     "coupon": 1.875,
+     "maturity": "2051-02-15",
+     "yield": 5.393,
+     "beta": 0.97
+    },
+    {
+     "name": "T 2 3/8 05/15/51",
+     "id": "912810SX7",
+     "coupon": 2.375,
+     "maturity": "2051-05-15",
+     "yield": 5.392,
+     "beta": 0.97
+    },
+    {
+     "name": "T 2 08/15/51",
+     "id": "912810SZ2",
+     "coupon": 2.0,
+     "maturity": "2051-08-15",
+     "yield": 5.391,
+     "beta": 0.97
+    },
+    {
+     "name": "T 1 7/8 11/15/51",
+     "id": "912810TB4",
+     "coupon": 1.875,
+     "maturity": "2051-11-15",
+     "yield": 5.39,
+     "beta": 0.97
+    }
+   ]
+  },
+  "WN": {
+   "market": "UST",
+   "name": "Ultra T-Bond",
+   "currency": "$",
+   "face": 100000,
+   "freq": 2,
+   "cf": "cme",
+   "roundMonths": 3,
+   "asOf": "2026-10-28",
+   "delivery": "2026-12-31",
+   "generic": "30 Yr par yield",
+   "vol": 76,
+   "yieldSource": "Treasury par curve interpolated at maturity",
+   "bonds": [
+    {
+     "name": "T 2 1/4 02/15/52",
+     "id": "912810TD0",
+     "coupon": 2.25,
+     "maturity": "2052-02-15",
+     "yield": 5.389,
+     "beta": 1.02
+    },
+    {
+     "name": "T 2 7/8 05/15/52",
+     "id": "912810TG3",
+     "coupon": 2.875,
+     "maturity": "2052-05-15",
+     "yield": 5.388,
+     "beta": 1.02
+    },
+    {
+     "name": "T 3 08/15/52",
+     "id": "912810TJ7",
+     "coupon": 3.0,
+     "maturity": "2052-08-15",
+     "yield": 5.387,
+     "beta": 1.02
+    },
+    {
+     "name": "T 4 11/15/52",
+     "id": "912810TL2",
+     "coupon": 4.0,
+     "maturity": "2052-11-15",
+     "yield": 5.386,
+     "beta": 1.02
+    },
+    {
+     "name": "T 3 5/8 02/15/53",
+     "id": "912810TN8",
+     "coupon": 3.625,
+     "maturity": "2053-02-15",
+     "yield": 5.385,
+     "beta": 1.02
+    },
+    {
+     "name": "T 3 5/8 05/15/53",
+     "id": "912810TR9",
+     "coupon": 3.625,
+     "maturity": "2053-05-15",
+     "yield": 5.384,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 1/8 08/15/53",
+     "id": "912810TT5",
+     "coupon": 4.125,
+     "maturity": "2053-08-15",
+     "yield": 5.383,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 3/4 11/15/53",
+     "id": "912810TV0",
+     "coupon": 4.75,
+     "maturity": "2053-11-15",
+     "yield": 5.382,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 1/4 02/15/54",
+     "id": "912810TX6",
+     "coupon": 4.25,
+     "maturity": "2054-02-15",
+     "yield": 5.381,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 5/8 05/15/54",
+     "id": "912810UA4",
+     "coupon": 4.625,
+     "maturity": "2054-05-15",
+     "yield": 5.38,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 1/4 08/15/54",
+     "id": "912810UC0",
+     "coupon": 4.25,
+     "maturity": "2054-08-15",
+     "yield": 5.379,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 1/2 11/15/54",
+     "id": "912810UE6",
+     "coupon": 4.5,
+     "maturity": "2054-11-15",
+     "yield": 5.378,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 5/8 02/15/55",
+     "id": "912810UG1",
+     "coupon": 4.625,
+     "maturity": "2055-02-15",
+     "yield": 5.377,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 3/4 05/15/55",
+     "id": "912810UK2",
+     "coupon": 4.75,
+     "maturity": "2055-05-15",
+     "yield": 5.376,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 3/4 08/15/55",
+     "id": "912810UM8",
+     "coupon": 4.75,
+     "maturity": "2055-08-15",
+     "yield": 5.375,
+     "beta": 1.01
+    },
+    {
+     "name": "T 4 5/8 11/15/55",
+     "id": "912810UP1",
+     "coupon": 4.625,
+     "maturity": "2055-11-15",
+     "yield": 5.374,
+     "beta": 1.0
+    },
+    {
+     "name": "T 4 3/4 02/15/56",
+     "id": "912810UR7",
+     "coupon": 4.75,
+     "maturity": "2056-02-15",
+     "yield": 5.373,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 05/15/56",
+     "id": "912810UU0",
+     "coupon": 5.0,
+     "maturity": "2056-05-15",
+     "yield": 5.372,
+     "beta": 1.0
+    },
+    {
+     "name": "T 5 1/8 08/15/56",
+     "id": "912810UW6",
+     "coupon": 5.125,
+     "maturity": "2056-08-15",
+     "yield": 5.371,
+     "beta": 1.0
+    }
+   ]
+  },
+  "DU": {
+   "market": "Bund",
+   "name": "Euro-Schatz",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 1,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 2y zero yield",
+   "vol": 70,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "DBR 2.7 09/13/28",
+     "id": "DE000BU22148",
+     "coupon": 2.7,
+     "maturity": "2028-09-13",
+     "yield": 3.09,
+     "beta": 0.96,
+     "cf": 0.946091
+    },
+    {
+     "name": "DBR 2.4 10/19/28",
+     "id": "DE000BU25018",
+     "coupon": 2.4,
+     "maturity": "2028-10-19",
+     "yield": 3.11,
+     "beta": 0.99,
+     "cf": 0.938364
+    },
+    {
+     "name": "DBR 0 11/15/28",
+     "id": "DE0001102556",
+     "coupon": 0.0,
+     "maturity": "2028-11-15",
+     "yield": 3.06,
+     "beta": 1.01,
+     "cf": 0.893556
+    },
+    {
+     "name": "DBR 0.25 02/15/29",
+     "id": "DE0001102465",
+     "coupon": 0.25,
+     "maturity": "2029-02-15",
+     "yield": 3.08,
+     "beta": 1.03,
+     "cf": 0.885495
+    }
+   ]
+  },
+  "OE": {
+   "market": "Bund",
+   "name": "Euro-Bobl",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 1,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 5y zero yield",
+   "vol": 86,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "DBR 0 08/15/31 (G)",
+     "id": "DE0001030732",
+     "coupon": 0.0,
+     "maturity": "2031-08-15",
+     "yield": 3.17,
+     "beta": 1.0,
+     "cf": 0.761347
+    },
+    {
+     "name": "DBR 0 08/15/31",
+     "id": "DE0001102564",
+     "coupon": 0.0,
+     "maturity": "2031-08-15",
+     "yield": 3.18,
+     "beta": 1.0,
+     "cf": 0.761347
+    },
+    {
+     "name": "DBR 2.9 10/08/31",
+     "id": "DE000BU25075",
+     "coupon": 2.9,
+     "maturity": "2031-10-08",
+     "yield": 3.22,
+     "beta": 1.0,
+     "cf": 0.872911
+    },
+    {
+     "name": "DBR 0 02/15/32",
+     "id": "DE0001102580",
+     "coupon": 0.0,
+     "maturity": "2032-02-15",
+     "yield": 3.23,
+     "beta": 0.98,
+     "cf": 0.739308
+    }
+   ]
+  },
+  "RX": {
+   "market": "Bund",
+   "name": "Euro-Bund",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 1,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 10y zero yield",
+   "vol": 72,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "DBR 2.6 08/15/35",
+     "id": "DE000BU2Z056",
+     "coupon": 2.6,
+     "maturity": "2035-08-15",
+     "yield": 3.34,
+     "beta": 1.0,
+     "cf": 0.774902
+    },
+    {
+     "name": "DBR 2.9 02/15/36",
+     "id": "DE000BU2Z064",
+     "coupon": 2.9,
+     "maturity": "2036-02-15",
+     "yield": 3.36,
+     "beta": 0.99,
+     "cf": 0.785735
+    },
+    {
+     "name": "DBR 3 08/15/36",
+     "id": "DE000BU2Z072",
+     "coupon": 3.0,
+     "maturity": "2036-08-15",
+     "yield": 3.37,
+     "beta": 1.0,
+     "cf": 0.784157
+    }
+   ]
+  },
+  "UB": {
+   "market": "Bund",
+   "name": "Euro-Buxl",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 1,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 30y zero yield",
+   "vol": 78,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "DBR 0 08/15/52",
+     "id": "DE0001102572",
+     "coupon": 0.0,
+     "maturity": "2052-08-15",
+     "yield": 3.67,
+     "beta": 0.96,
+     "cf": 0.365252
+    },
+    {
+     "name": "DBR 1.8 08/15/53",
+     "id": "DE0001102614",
+     "coupon": 1.8,
+     "maturity": "2053-08-15",
+     "yield": 3.71,
+     "beta": 0.97,
+     "cf": 0.643086
+    },
+    {
+     "name": "DBR 1.8 08/15/53 (G)",
+     "id": "DE0001030757",
+     "coupon": 1.8,
+     "maturity": "2053-08-15",
+     "yield": 3.69,
+     "beta": 0.97,
+     "cf": 0.643086
+    },
+    {
+     "name": "DBR 2.5 08/15/54",
+     "id": "DE000BU2D004",
+     "coupon": 2.5,
+     "maturity": "2054-08-15",
+     "yield": 3.7,
+     "beta": 0.98,
+     "cf": 0.75153
+    },
+    {
+     "name": "DBR 2.9 08/15/56",
+     "id": "DE000BU2D012",
+     "coupon": 2.9,
+     "maturity": "2056-08-15",
+     "yield": 3.69,
+     "beta": 1.0,
+     "cf": 0.810737
+    }
+   ]
+  },
+  "OAT": {
+   "market": "OAT",
+   "name": "Euro-OAT",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 1,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 10y zero yield \u00d7 1.12 (OAT/DE vol ratio)",
+   "vol": 81,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "FRTR 3.5 11/25/35",
+     "id": "FR0014012II5",
+     "coupon": 3.5,
+     "maturity": "2035-11-25",
+     "yield": 4.82,
+     "beta": 0.99,
+     "cf": 0.830509
+    },
+    {
+     "name": "FRTR 3.7 11/25/36",
+     "id": "FR0014018YR0",
+     "coupon": 3.7,
+     "maturity": "2036-11-25",
+     "yield": 4.92,
+     "beta": 1.0,
+     "cf": 0.831189
+    }
+   ]
+  },
+  "BTS": {
+   "market": "BTP",
+   "name": "Short-Term Euro-BTP",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 2,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 2y zero yield \u00d7 1.32 (BTP/DE vol ratio)",
+   "vol": 92,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "BTPS 2.35 01/15/29",
+     "id": "IT0005660052",
+     "coupon": 2.35,
+     "maturity": "2029-01-15",
+     "yield": 3.588,
+     "beta": 1.02,
+     "cf": 0.930636
+    },
+    {
+     "name": "BTPS 4.1 02/01/29",
+     "id": "IT0005566408",
+     "coupon": 4.1,
+     "maturity": "2029-02-01",
+     "yield": 3.607,
+     "beta": 1.03,
+     "cf": 0.963932
+    },
+    {
+     "name": "BTPS 0.45 02/15/29",
+     "id": "IT0005467482",
+     "coupon": 0.45,
+     "maturity": "2029-02-15",
+     "yield": 3.549,
+     "beta": 1.03,
+     "cf": 0.889684
+    },
+    {
+     "name": "BTPS 2.4 03/15/29",
+     "id": "IT0005689960",
+     "coupon": 2.4,
+     "maturity": "2029-03-15",
+     "yield": 3.627,
+     "beta": 1.04,
+     "cf": 0.926581
+    },
+    {
+     "name": "BTPS 2.8 06/15/29",
+     "id": "IT0005495731",
+     "coupon": 2.8,
+     "maturity": "2029-06-15",
+     "yield": 3.657,
+     "beta": 1.07,
+     "cf": 0.928269
+    },
+    {
+     "name": "BTPS 3.35 07/01/29",
+     "id": "IT0005584849",
+     "coupon": 3.35,
+     "maturity": "2029-07-01",
+     "yield": 3.686,
+     "beta": 1.08,
+     "cf": 0.939759
+    },
+    {
+     "name": "BTPS 3 08/01/29",
+     "id": "IT0005365165",
+     "coupon": 3.0,
+     "maturity": "2029-08-01",
+     "yield": 3.657,
+     "beta": 1.08,
+     "cf": 0.929617
+    },
+    {
+     "name": "BTPS 3 09/15/29",
+     "id": "IT0005716839",
+     "coupon": 3.0,
+     "maturity": "2029-09-15",
+     "yield": 3.725,
+     "beta": 1.1,
+     "cf": 0.926428
+    },
+    {
+     "name": "BTPS 3 10/01/29",
+     "id": "IT0005611055",
+     "coupon": 3.0,
+     "maturity": "2029-10-01",
+     "yield": 3.735,
+     "beta": 1.1,
+     "cf": 0.925593
+    },
+    {
+     "name": "BTPS 3.85 12/15/29",
+     "id": "IT0005519787",
+     "coupon": 3.85,
+     "maturity": "2029-12-15",
+     "yield": 3.765,
+     "beta": 1.11,
+     "cf": 0.943537
+    }
+   ]
+  },
+  "IK": {
+   "market": "BTP",
+   "name": "Euro-BTP",
+   "currency": "\u20ac",
+   "face": 100000,
+   "freq": 2,
+   "cf": "given",
+   "asOf": "28/10/2026",
+   "delivery": "2026-12-08",
+   "generic": "German 10y zero yield \u00d7 1.32 (BTP/DE vol ratio)",
+   "vol": 96,
+   "yieldSource": "Borsa Italiana reference prices (gross yield to maturity)",
+   "bonds": [
+    {
+     "name": "BTPS 3.65 08/01/35",
+     "id": "IT0005631590",
+     "coupon": 3.65,
+     "maturity": "2035-08-01",
+     "yield": 4.382,
+     "beta": 1.0,
+     "cf": 0.848511
+    },
+    {
+     "name": "BTPS 3.6 10/01/35",
+     "id": "IT0005648149",
+     "coupon": 3.6,
+     "maturity": "2035-10-01",
+     "yield": 4.402,
+     "beta": 0.99,
+     "cf": 0.842901
+    },
+    {
+     "name": "BTPS 3.45 02/01/36",
+     "id": "IT0005676504",
+     "coupon": 3.45,
+     "maturity": "2036-02-01",
+     "yield": 4.421,
+     "beta": 0.99,
+     "cf": 0.827903
+    },
+    {
+     "name": "BTPS 1.45 03/01/36",
+     "id": "IT0005402117",
+     "coupon": 1.45,
+     "maturity": "2036-03-01",
+     "yield": 4.402,
+     "beta": 0.99,
+     "cf": 0.685975
+    },
+    {
+     "name": "BTPS 3.8 07/01/36",
+     "id": "IT0005706285",
+     "coupon": 3.8,
+     "maturity": "2036-07-01",
+     "yield": 4.47,
+     "beta": 1.0,
+     "cf": 0.847318
+    },
+    {
+     "name": "BTPS 0.95 03/01/37",
+     "id": "IT0005433195",
+     "coupon": 0.95,
+     "maturity": "2037-03-01",
+     "yield": 4.49,
+     "beta": 1.0,
+     "cf": 0.623169
+    }
+   ]
+  }
+ }
+}
