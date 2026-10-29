@@ -12,6 +12,10 @@ execute:
 jupyter: python3
 ---
 
+::: {.small}
+See also: [Bond futures CTD Monte Carlo](ctd.html), an interactive model of the fair value of the net basis.
+:::
+
 ```{python}
 from io import StringIO
 

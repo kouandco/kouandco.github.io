@@ -1,0 +1,260 @@
+---
+title: "Bond Futures CTD Monte Carlo"
+subtitle: "Fair value of the net basis, CTD switch probability and option-adjusted DV01 — US Treasury futures example"
+page-layout: full
+format:
+  html:
+    theme: cosmo
+    toc: false
+execute:
+  echo: false
+---
+
+[← Home](index.html)
+
+```{=html}
+<style>
+  .grid > * { min-width: 0; }
+  form[class^="inputs-"] { max-width: 100%; }
+  form[class^="inputs-"] textarea { width: 100%; }
+</style>
+```
+
+```{ojs}
+import {parseBasket, parseDate, setup, simulate, optionAdjustedDV01, sweep, normals, to32nds} from "./ctd.js"
+```
+
+::: {.grid}
+
+::: {.g-col-12 .g-col-lg-3}
+
+### Inputs
+
+```{ojs}
+viewof drift = Inputs.range([-300, 300], {value: 0, step: 5, label: "Generic yield drift (bp / year)"})
+viewof vol = Inputs.range([20, 250], {value: 83, step: 1, label: "Generic yield vol (bp / year)"})
+viewof nScen = Inputs.select([2000, 5000, 10000, 20000], {value: 10000, label: "Scenarios"})
+```
+
+```{ojs}
+html`<p class="small text-muted">Daily vol ≈ ${(vol / Math.sqrt(252)).toFixed(1)} bp.
+To delivery: mean ${(drift * model.T).toFixed(0)} bp, s.d. ${(vol * Math.sqrt(model.T)).toFixed(0)} bp
+(${(model.T * 365.25).toFixed(0)} days).</p>`
+```
+
+#### Contract
+
+```{ojs}
+viewof asOf = Inputs.text({value: "2026-10-28", label: "Analysis date"})
+viewof delivery = Inputs.text({value: "2026-12-31", label: "Delivery date"})
+viewof roundMonths = Inputs.radio(new Map([["Quarters (TY, US, UB)", 3], ["Months (TU, Z3N, FV)", 1]]), {value: 3, label: "CF term rounding"})
+```
+
+#### Deliverable basket
+
+::: {.small .text-muted}
+One bond per line: `name, coupon %, maturity, yield %, beta to generic`.
+:::
+
+```{ojs}
+viewof basketText = Inputs.textarea({
+  value: `T 4 1/4 06/30/33, 4.25, 2033-06-30, 4.934, 0.99
+T 4 3/8 07/31/33, 4.375, 2033-07-31, 4.938, 1.00
+T 3 7/8 08/15/33, 3.875, 2033-08-15, 4.940, 1.00
+T 4 1/2 08/31/33, 4.5, 2033-08-31, 4.942, 1.00
+T 5 09/30/33, 5.0, 2033-09-30, 4.946, 1.00
+T 4 1/2 11/15/33, 4.5, 2033-11-15, 4.952, 1.00
+T 4 02/15/34, 4.0, 2034-02-15, 4.960, 1.00
+T 4 3/8 05/15/34, 4.375, 2034-05-15, 4.968, 1.00
+T 3 7/8 08/15/34, 3.875, 2034-08-15, 4.977, 1.00
+T 4 1/4 11/15/34, 4.25, 2034-11-15, 4.985, 1.00`,
+  rows: 12,
+  submit: "Update basket",
+  spellcheck: false
+})
+```
+
+::: {.small .text-muted}
+Default: TY (10-year T-note) December 2026 (TYZ6), as of 28 Oct 2026.
+Basket: every 7- and 10-year note with 6½ to 8 years left to maturity from 1 Dec 2026
+(coupons from [TreasuryDirect](https://www.treasurydirect.gov/auctions/auction-query/)). The 7-year notes auctioned in late October and November 2026
+are not included: their coupons are not yet known.
+Yields: the [Treasury par curve](https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2026)
+interpolated at each maturity. Betas and vol: 65-day daily changes against the 10-year par yield.
+These are approximations of each note's own market yield, so replace them with quotes for trading use.
+:::
+
+:::
+
+::: {.g-col-12 .g-col-lg-9}
+
+```{ojs}
+model = {
+  const d = parseDate(delivery);
+  return setup({
+    basket: parseBasket(basketText),
+    analysisDate: parseDate(asOf),
+    deliveryDate: d,
+    firstDeliveryDay: new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)),
+    roundMonths
+  });
+}
+W = normals(nScen, 1)
+params = ({drift: drift / 10000, vol: vol / 10000})
+run = simulate(model, W, {...params, keepScenarios: true})
+names = model.bonds.map(b => b.name)
+ctd = model.bonds[model.ctd0]
+oaDV01 = optionAdjustedDV01(model, W, params) * 1000
+ctdDV01 = ctd.beta * ctd.dv01 / ctd.cf * 1000
+pSwitch = 1 - run.prob[model.ctd0]
+```
+
+```{ojs}
+tile = (label, value, note) => html`<div><div class="border rounded p-2 h-100">
+  <div class="small text-muted">${label}</div>
+  <div class="fs-4 fw-semibold">${value}</div>
+  <div class="small text-muted">${note}</div></div></div>`
+
+html`<div class="mb-3" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.5rem;">
+  ${tile("Current CTD", ctd.name, `price / CF ${ctd.f0.toFixed(3)}`)}
+  ${tile("P(CTD switch)", `${(pSwitch * 100).toFixed(1)}%`, "by delivery")}
+  ${tile("Option-adj. DV01", `$${oaDV01.toFixed(1)}`, "per contract, per bp")}
+  ${tile("CTD DV01 / CF", `$${ctdDV01.toFixed(1)}`, `β-weighted · gap ${(oaDV01 - ctdDV01 >= 0 ? "+" : "")}${(oaDV01 - ctdDV01).toFixed(1)}`)}
+</div>`
+```
+
+#### Distribution of outcomes at delivery, coloured by CTD
+
+```{ojs}
+Plot.plot({
+  width: 860,
+  height: 320,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 50,
+  x: {label: "Change in generic yield to delivery (bp) →"},
+  y: {label: "↑ Scenarios", grid: true},
+  color: {domain: names, scheme: "tableau10", legend: true},
+  marks: [
+    Plot.rectY(run.scenarios, Plot.binX({y: "count"}, {x: "dy", fill: "ctd", thresholds: 80})),
+    Plot.ruleY([0])
+  ]
+})
+```
+
+#### CTD probability and fair value of the net basis
+
+```{ojs}
+html`<div class="table-responsive"><table class="table table-sm align-middle small">
+  <thead><tr>
+    <th>Bond</th><th class="text-end">Yield</th><th class="text-end">β</th><th class="text-end">CF</th>
+    <th class="text-end">Price/CF at delivery*</th><th>CTD probability</th>
+    <th class="text-end">FV net basis (pts)</th><th class="text-end">(32nds)</th><th class="text-end">DV01/CF ($)</th>
+  </tr></thead>
+  <tbody>${model.bonds.map((b, i) => html`<tr class=${i === model.ctd0 ? "table-primary" : ""}>
+    <td>${b.name}</td>
+    <td class="text-end">${(b.y0 * 100).toFixed(3)}%</td>
+    <td class="text-end">${b.beta.toFixed(2)}</td>
+    <td class="text-end">${b.cf.toFixed(4)}</td>
+    <td class="text-end">${b.f0.toFixed(3)}</td>
+    <td style="min-width: 140px"><div class="d-flex align-items-center gap-2">
+      <div style="background: #1f5fa8; height: 10px; width: ${run.prob[i] * 80}px"></div>
+      <span>${(run.prob[i] * 100).toFixed(1)}%</span></div></td>
+    <td class="text-end">${run.fvBasis[i].toFixed(3)}</td>
+    <td class="text-end">${to32nds(run.fvBasis[i])}</td>
+    <td class="text-end">${(b.dv01 / b.cf * 1000).toFixed(1)}</td>
+  </tr>`)}</tbody>
+</table></div>
+<p class="small text-muted">* At today's yields, priced for settlement on the delivery date. Highlighted row is today's CTD.
+Expected futures price at delivery: ${run.futures.toFixed(3)}. DV01 per $100k contract.</p>`
+```
+
+#### How the answer changes with today's yield level
+
+```{ojs}
+shifts = d3.range(-200, 301, 10)
+grid = sweep(model, W.slice(0, 2000), params, shifts)
+```
+
+::: {.grid}
+
+::: {.g-col-12 .g-col-md-6}
+
+```{ojs}
+Plot.plot({
+  width: 440,
+  height: 300,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 45,
+  x: {label: "Shift in today's generic yield (bp) →"},
+  y: {label: "↑ CTD probability", grid: true, percent: true, domain: [0, 100]},
+  color: {domain: names, scheme: "tableau10"},
+  marks: [
+    Plot.ruleX([0], {stroke: "#999", strokeDasharray: "4,3"}),
+    Plot.line(grid.flatMap(g => names.map((n, i) => ({shift: g.shift, bond: n, prob: g.prob[i]}))),
+      {x: "shift", y: "prob", stroke: "bond", strokeWidth: 2}),
+    Plot.tip(grid.flatMap(g => names.map((n, i) => ({shift: g.shift, bond: n, prob: g.prob[i]}))).filter(d => d.prob > 0.005),
+      Plot.pointer({x: "shift", y: "prob", title: d => `${d.bond}\n${d.shift >= 0 ? "+" : ""}${d.shift} bp: ${(d.prob * 100).toFixed(0)}%`}))
+  ]
+})
+```
+
+:::
+
+::: {.g-col-12 .g-col-md-6}
+
+```{ojs}
+Plot.plot({
+  width: 440,
+  height: 300,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 45,
+  x: {label: "Shift in today's generic yield (bp) →"},
+  y: {label: "↑ DV01 per contract ($)", grid: true},
+  color: {legend: true, domain: ["Option-adjusted", "CTD DV01 / CF"], range: ["#1f5fa8", "#e15759"]},
+  marks: [
+    Plot.ruleX([0], {stroke: "#999", strokeDasharray: "4,3"}),
+    Plot.line(grid.flatMap(g => [
+      {shift: g.shift, series: "Option-adjusted", dv01: g.oaDV01 * 1000},
+      {shift: g.shift, series: "CTD DV01 / CF", dv01: g.ctdDV01 * 1000}
+    ]), {x: "shift", y: "dv01", stroke: "series", strokeWidth: 2}),
+    Plot.tip(grid.flatMap(g => [
+      {shift: g.shift, series: "Option-adjusted", dv01: g.oaDV01 * 1000},
+      {shift: g.shift, series: "CTD DV01 / CF", dv01: g.ctdDV01 * 1000}
+    ]), Plot.pointerX({x: "shift", y: "dv01", stroke: "series", title: d => `${d.series}: $${d.dv01.toFixed(1)}`}))
+  ]
+})
+```
+
+:::
+
+:::
+
+::: {.small .text-muted}
+Each point re-runs the model with today's generic yield shifted (every bond moves by β × shift),
+using 2,000 scenarios. When a CTD switch is likely, the futures DV01 departs from the current CTD's DV01 / CF,
+so hedge ratios based on the CTD alone over- or under-hedge.
+:::
+
+::: {.callout-note collapse="true"}
+## Methodology
+
+1. **Scenarios.** The generic yield follows Brownian motion with drift:
+   Δy<sup>g</sup> = μT + σ√T · W, W ~ N(0, 1), where T is the time to delivery.
+2. **Bond yields at delivery.** Each deliverable moves with its beta: y<sub>T</sub><sup>i</sup> = y<sub>0</sub><sup>i</sup> + β<sup>i</sup> · Δy<sup>g</sup>.
+3. **CTD.** Clean prices P<sub>T</sub><sup>i</sup> are computed for settlement on the delivery date; the bond with the
+   lowest P<sub>T</sub><sup>i</sup> / CF<sup>i</sup> is the CTD in that scenario. CTD probability = share of scenarios.
+4. **Net basis fair value.** In each scenario the futures price is F<sub>T</sub> = min<sub>i</sub> P<sub>T</sub><sup>i</sup> / CF<sup>i</sup> and the basis
+   is B<sub>T</sub><sup>i</sup> = P<sub>T</sub><sup>i</sup> − F<sub>T</sub> · CF<sup>i</sup>. The fair value of the net basis is the average B<sub>T</sub><sup>i</sup>
+   across scenarios, since a long net basis position converges to the basis at delivery.
+5. **Option-adjusted DV01.** The change in expected futures price E[F<sub>T</sub>] for a 1 bp shift in today's generic
+   yield (central difference with the same random draws), × $1,000 per point for a $100k contract.
+
+Conversion factors use the CME formula (6% notional coupon, term rounded down to quarters or months from
+the first day of the delivery month). Simplifications: a single delivery date (the timing, end-of-month and
+wild-card options are ignored), today's yields are used as the expected yields at delivery unless a drift is set,
+and the curve moves through one factor.
+:::
+
+:::
+
+:::
