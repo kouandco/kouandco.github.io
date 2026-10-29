@@ -4,7 +4,7 @@ subtitle: "Basis trades (EFP), invoice spreads (EFS) and positioning in Eurex go
 page-layout: full
 format:
   html:
-    theme: cosmo
+    theme: [darkly, theme.scss]
     toc: false
 execute:
   echo: false
@@ -20,6 +20,8 @@ execute:
   .flow-table tbody tr { cursor: pointer; }
   .trade-table { max-height: 360px; overflow-y: auto; }
   .trade-table thead th { position: sticky; top: 0; background: var(--bs-body-bg); }
+  .oi-table td { border-bottom: 1px solid #0d1117; }
+  .oi-sub { font-size: 0.72rem; opacity: 0.8; }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
 </style>
 ```
@@ -30,6 +32,10 @@ ctdlib = import(new URL(`ctd.js?v=${Date.now()}`, document.baseURI).href)
 parseDate = ctdlib.parseDate
 setup = ctdlib.setup
 yieldFromPrice = ctdlib.yieldFromPrice
+chartlib = import(new URL(`charts.js?v=${Date.now()}`, document.baseURI).href)
+Plotly = require("plotly.js-dist-min@2.35.2")
+plot = (data, layout, height) => chartlib.plot(Plotly, data, layout, height)
+COLORS = chartlib.COLORS
 trades = fetch(`eurex_trades.json?v=${Date.now()}`).then(r => r.json())
 baskets = FileAttachment("baskets.json").json()
 oiData = FileAttachment("eurex_flow.json").json()
@@ -101,12 +107,6 @@ cleanPrints = (rows, floor, k = 8) => {
 droppedNote = (dropped, unit) => dropped.length ? html`<p class="small text-muted">Excluded as misreported
   (far from this series' median): ${dropped.map(r => `${r.t.replace("T", " ")} (${r.v.toFixed(0)} ${unit})`).join("; ")}.</p>` : html``
 
-dailySummary = all => d3.rollups(all, g => {
-  const q = d3.sum(g, r => r.q);
-  return {day: g[0].t.slice(0, 10), vwap: d3.sum(g, r => r.v * r.q) / q, lo: d3.min(g, r => r.v), hi: d3.max(g, r => r.v),
-    last: g[g.length - 1].v, q, n: g.length};
-}, r => r.t.slice(0, 10)).map(d => d[1])
-
 // Stats for the latest trading day in the series.
 tilesFor = (rows, unit, digits) => {
   if (!rows.length) return html`<p class="text-muted">No trades in this series.</p>`;
@@ -121,55 +121,44 @@ tilesFor = (rows, unit, digits) => {
 }
 
 // Every trade in sequence across the whole history: level (waterfall or bubbles), the day's running VWAP
-// (restarting each morning) and lots. Grey rules mark the start of each day.
+// (restarting each morning) and lots. Thin rules mark the start of each day. Drag to zoom, double-click to reset.
 tradeChart = (rows, unit, view) => {
   if (!rows.length) return html``;
-  const width = 900;
-  const common = {width, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55, marginRight: 20};
+  const idx = rows.map(r => r.i);
   const starts = rows.filter(r => r.first);
-  // Label a day's first trade only when it is at least 40px past the previous label.
-  const perTrade = (width - 75) / rows.length;
-  const labelled = new Set();
-  let lastLabel = -Infinity;
-  for (const r of starts) if ((r.i - lastLabel) * perTrade >= 40) { labelled.add(r.i); lastLabel = r.i; }
-  const x = {type: "band", label: null, domain: rows.map(r => r.i), padding: 0.2,
-    tickFormat: i => labelled.has(i) ? rows[i].day.slice(5) : "", tickSize: 0};
-  const title = r => `${r.day} ${r.time}  ${fmt(r.q)} lots\n${r.v.toFixed(2)} ${unit} (${signed(r.v - r.prev, 2)})\nday VWAP ${r.vwap.toFixed(2)}`;
-  const dayRules = Plot.ruleX(starts.slice(1), {x: "i", stroke: "#ccc", dx: -3});
-  const vwap = Plot.line(rows, {x: "i", y: "vwap", z: "day", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"});
-  const level = Plot.plot({...common, height: 300, x, y: {label: `↑ ${unit}`, grid: true, zero: false},
-    color: {domain: ["Up", "Down", "Unch."], range: ["#2e7d32", "#c62828", "#9e9e9e"], legend: view === "Waterfall"},
-    marks: view === "Waterfall"
-      ? [dayRules,
-         Plot.barY(rows, {x: "i", y1: "prev", y2: "v", insetLeft: 0, insetRight: 0, fill: r => r.v > r.prev ? "Up" : r.v < r.prev ? "Down" : "Unch.", title}),
-         Plot.tickY(rows, {x: "i", y: "v", stroke: "#222", strokeWidth: 1}),
-         vwap]
-      : [dayRules,
-         vwap,
-         Plot.dot(rows, {x: "i", y: "v", r: "q", fill: "#e15759", fillOpacity: 0.45, stroke: "#e15759", title})],
-    r: {range: [2, 14]}});
-  const volume = Plot.plot({...common, height: 120, marginTop: 5, x, y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
-    marks: [dayRules, Plot.barY(rows, {x: "i", y: "q", fill: "#9fb8d8", title}), Plot.ruleY([0])]});
-  return html`<div>${level}${volume}</div>`;
-}
-
-historyChart = (all, unit) => {
-  const days = dailySummary(all);
-  if (!days.length) return html``;
-  const common = {width: 900, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55,
-    x: {type: "band", label: null, domain: days.map(d => d.day), padding: 0.25, tickFormat: d => d.slice(5)}};
-  return html`<div>
-  ${Plot.plot({...common, height: 240, y: {label: `↑ ${unit}`, grid: true, zero: false},
-    marks: [
-      Plot.ruleX(days, {x: "day", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 6}),
-      Plot.line(days, {x: "day", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2}),
-      Plot.dot(days, {x: "day", y: "vwap", fill: "#1f5fa8", r: 3,
-        title: d => `${d.day}\nVWAP ${d.vwap.toFixed(2)} ${unit}\nrange ${d.lo.toFixed(2)} – ${d.hi.toFixed(2)}\n${fmt(d.q)} lots, ${d.n} trades`}),
-      Plot.dot(days.filter(d => d.day === days[days.length - 1].day), {x: "day", y: "vwap", r: 6, stroke: "#e15759", strokeWidth: 2})
-    ]})}
-  ${Plot.plot({...common, height: 110, marginTop: 5, y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
-    marks: [Plot.barY(days, {x: "day", y: "q", fill: d => d.day === days[days.length - 1].day ? "#e15759" : "#9fb8d8"}), Plot.ruleY([0])]})}
-  </div>`;
+  const hover = rows.map(r => `${r.day} ${r.time} · ${fmt(r.q)} lots<br>${r.v.toFixed(2)} ${unit} (${signed(r.v - r.prev, 2)})` +
+    `<br>day VWAP ${r.vwap.toFixed(2)} ${unit}`);
+  // VWAP line broken between days so each day's VWAP starts afresh.
+  const vx = [], vy = [];
+  rows.forEach((r, k) => { if (r.first && k) { vx.push(null); vy.push(null); } vx.push(r.i); vy.push(r.vwap); });
+  // Label a day's first trade only when it is at least ~40px past the previous label.
+  const perTrade = 820 / rows.length;
+  const labelled = [];
+  for (const r of starts) if (!labelled.length || (r.i - labelled[labelled.length - 1]) * perTrade >= 40) labelled.push(r.i);
+  const level = view === "Waterfall"
+    ? [{type: "bar", name: "Trade", x: idx, base: rows.map(r => r.prev), y: rows.map(r => (r.v - r.prev) || 1e-9),
+        marker: {color: rows.map(r => r.v > r.prev ? "#3fb950" : r.v < r.prev ? "#f85149" : "#8b949e")},
+        hovertext: hover, hoverinfo: "text", showlegend: false},
+       {type: "scatter", mode: "markers", name: "Print", x: idx, y: rows.map(r => r.v),
+        marker: {symbol: "line-ew-open", size: 7, color: "#f0f6fc", line: {width: 1}}, hoverinfo: "skip", showlegend: false}]
+    : [{type: "scatter", mode: "markers", name: "Trade (size = lots)", x: idx, y: rows.map(r => r.v),
+        marker: {size: rows.map(r => r.q), sizemode: "area", sizeref: 2 * d3.max(rows, r => r.q) / 22 ** 2, sizemin: 2,
+          color: "rgba(247,129,102,0.45)", line: {color: "#f78166", width: 1}},
+        hovertext: hover, hoverinfo: "text"}];
+  return plot([
+    ...level,
+    {type: "scatter", mode: "lines", name: "Day VWAP", x: vx, y: vy, line: {color: "#58a6ff", width: 2, shape: "hv"},
+      connectgaps: false, hoverinfo: "skip"},
+    {type: "bar", name: "Lots", x: idx, y: rows.map(r => r.q), yaxis: "y2", marker: {color: "rgba(88,166,255,0.45)"},
+      hovertext: hover, hoverinfo: "text", showlegend: false}
+  ], {
+    bargap: 0.15,
+    xaxis: {tickvals: labelled, ticktext: labelled.map(i => rows[i].day.slice(5)), range: [-0.5, rows.length - 0.5], showgrid: false},
+    yaxis: {domain: [0.3, 1], title: {text: unit}},
+    yaxis2: {domain: [0, 0.22], title: {text: "Lots"}},
+    shapes: starts.slice(1).map(r => ({type: "line", x0: r.i - 0.5, x1: r.i - 0.5, y0: 0, y1: 1, yref: "paper",
+      line: {color: "#30363d", width: 1}}))
+  }, 460);
 }
 
 tradeTable = (rows, cols) => html`<div class="table-responsive trade-table"><table class="table table-sm small">
@@ -211,12 +200,6 @@ tilesFor(efpRows, "c", 1)
 
 ```{ojs}
 tradeChart(efpRows, "c", efpView)
-```
-
-**Daily: VWAP (line), high–low range (grey) and volume**
-
-```{ojs}
-historyChart(efpAll, "c")
 ```
 
 ```{ojs}
@@ -291,12 +274,6 @@ tilesFor(efsRows, "bp", 1)
 tradeChart(efsRows, "bp", efsView)
 ```
 
-**Daily: VWAP (line), high–low range (grey) and volume**
-
-```{ojs}
-historyChart(efsAll, "bp")
-```
-
 ```{ojs}
 droppedNote(efsClean.dropped, "bp")
 ```
@@ -313,150 +290,118 @@ tradeTable(efsRows, [
 
 ```{ojs}
 FLOWS = ["New longs", "Short covering", "New shorts", "Long liquidation"]
-FLOW_COLORS = ["#2e7d32", "#81c784", "#c62828", "#ef9a9a"]
-flowColor = f => f ? FLOW_COLORS[FLOWS.indexOf(f)] : "#bdbdbd"
+FLOW_STYLE = ({
+  "New longs": ["rgba(63,185,80,0.85)", "#ffffff"],
+  "Short covering": ["rgba(63,185,80,0.28)", "#aff5b4"],
+  "New shorts": ["rgba(248,81,73,0.85)", "#ffffff"],
+  "Long liquidation": ["rgba(248,81,73,0.28)", "#ffc1bb"]
+})
+flowStyle = f => FLOW_STYLE[f] ?? ["#21262d", "#8b949e"]
 badge = f => {
   const el = document.createElement("span");
   el.className = "flow-badge";
-  el.style.background = flowColor(f);
-  el.style.color = f === "New longs" || f === "New shorts" ? "white" : "#222";
+  [el.style.background, el.style.color] = flowStyle(f);
   el.textContent = f ?? "n/a";
   return el;
 }
-latest = c => [...c.months].reverse().find(m => m.oi != null)
 monthLabel = m => new Date(`${m}-01T00:00:00Z`).toLocaleString("en-GB", {month: "short", year: "numeric", timeZone: "UTC"}).replace(/^Sept/, "Sep")
 isExpiry = m => ["03", "06", "09", "12"].includes(m.slice(5))
-oiCfg = oiData.contracts[code]
-months = oiCfg.months
-// Every month on the axis, so gaps in Eurex's data show as gaps.
-xAxis = ({type: "band", label: null, domain: months.map(m => m.month), padding: 0.15,
-  tickFormat: m => ["01", "04", "07", "10"].includes(m.slice(5)) ? monthLabel(m) : ""})
+compact = d3.format(".3~s")
+oiMonths = [...new Set(codes.flatMap(k => oiData.contracts[k].months.filter(m => m.oi != null).map(m => m.month)))].sort().reverse()
+oiSeries = (key, hoverExtra) => codes.map((k, i) => {
+  const c = oiData.contracts[k];
+  return {name: k, x: c.months.map(m => `${m.month}-01`), y: c.months.map(m => m[key]),
+    marker: {color: COLORS[i % COLORS.length]}, line: {color: COLORS[i % COLORS.length], width: 2},
+    customdata: c.months.map(m => [monthLabel(m.month), m.flow ?? "n/a", m.dYieldBp == null ? "–" : signed(m.dYieldBp)]),
+    hovertemplate: `<b>${k}</b> %{customdata[0]}<br>${hoverExtra}<br>%{customdata[1]} · Δyield %{customdata[2]} bp<extra></extra>`};
+})
+oiLayout = (title, extra = {}) => ({hovermode: "closest", xaxis: {type: "date", tickformat: "%b %y"},
+  yaxis: {title: {text: title}, tickformat: "~s"}, ...extra})
 ```
 
 ```{ojs}
-html`<div class="table-responsive"><table class="table table-sm table-hover align-middle small flow-table">
-  <thead><tr>
-    <th>Contract</th><th>Month</th><th class="text-end">Open interest</th><th class="text-end">Δ OI</th><th class="text-end">Δ OI %</th>
-    <th class="text-end">OI vs year ago</th><th class="text-end">Volume</th><th class="text-end">Δ yield (bp)</th><th>Flow</th>
-  </tr></thead>
-  <tbody>${codes.map(k => {
-    const c = oiData.contracts[k], m = latest(c);
-    const prev = c.months[c.months.indexOf(m) - 1];
-    const yearAgo = c.months.find(x => x.month === `${+m.month.slice(0, 4) - 1}${m.month.slice(4)}`);
-    const row = html`<tr class=${k === code ? "table-primary" : ""}>
-      <td><strong>${k}</strong> <span class="text-muted">${c.name}</span></td>
-      <td>${monthLabel(m.month)}${isExpiry(m.month) ? "*" : ""}</td>
-      <td class="text-end">${fmt(m.oi)}</td>
-      <td class="text-end">${m.dOI == null ? "–" : signed(m.dOI).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</td>
-      <td class="text-end">${prev?.oi ? signed(100 * m.dOI / prev.oi, 1) + "%" : "–"}</td>
-      <td class="text-end">${yearAgo?.oi ? signed(100 * (m.oi / yearAgo.oi - 1), 0) + "%" : "–"}</td>
-      <td class="text-end">${m.volume == null ? "–" : fmt(m.volume)}</td>
-      <td class="text-end">${signed(m.dYieldBp)}</td>
-      <td>${badge(m.flow)}</td>
-    </tr>`;
-    row.onclick = () => { viewof code.value = k; viewof code.dispatchEvent(new Event("input", {bubbles: true})); };
-    return row;
-  })}</tbody>
-</table></div>
-<p class="small text-muted">Click a row to switch contract. * Expiry month: month-end open interest is measured after the
-roll into the next contract, so falls can reflect positions not rolled rather than outright liquidation.
-Flow is n/a when the yield for that month is not yet published. Rising OI with futures up (yields down) = new longs;
-OI up, futures down = new shorts; OI down, futures up = short covering; OI down, futures down = long liquidation.</p>`
-```
-
-```{ojs}
-html`<div class="d-flex flex-wrap gap-2 mb-2">${FLOWS.map(badge)}${badge(null)}</div>`
+html`<div class="d-flex flex-wrap gap-2 mb-2">${FLOWS.map(badge)}${badge(null)}</div>
+<p class="small text-muted">All contracts, every month available. Click legend entries to hide or show contracts;
+drag to zoom, double-click to reset. Rising OI with futures up (yields down) = new longs; OI up, futures down = new shorts;
+OI down, futures up = short covering; OI down, futures down = long liquidation.</p>`
 ```
 
 ::: {.grid}
 
-::: {.g-col-12 .g-col-md-6}
+::: {.g-col-12 .g-col-lg-6}
 
 **Month-end open interest**
 
 ```{ojs}
-Plot.plot({
-  width: 440, height: 260,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 60,
-  x: xAxis,
-  y: {label: "↑ Contracts", grid: true, tickFormat: "~s"},
-  marks: [
-    Plot.barY(months.filter(m => m.oi != null), {x: "month", y: "oi", fill: d => flowColor(d.flow),
-      title: d => `${monthLabel(d.month)}\nOI ${fmt(d.oi)}\n${d.flow ?? "no flow label"}`}),
-    Plot.ruleY([0])
-  ]
-})
+plot(oiSeries("oi", "OI %{y:,}").map(t => ({...t, type: "scatter", mode: "lines+markers", connectgaps: false})),
+  oiLayout("Contracts"), 330)
 ```
 
 :::
 
-::: {.g-col-12 .g-col-md-6}
+::: {.g-col-12 .g-col-lg-6}
 
 **Monthly change in open interest**
 
 ```{ojs}
-Plot.plot({
-  width: 440, height: 260,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 60,
-  x: xAxis,
-  y: {label: "↑ Δ contracts", grid: true, tickFormat: "~s"},
-  marks: [
-    Plot.barY(months.filter(m => m.dOI != null), {x: "month", y: "dOI", fill: d => flowColor(d.flow),
-      title: d => `${monthLabel(d.month)}\nΔOI ${signed(d.dOI)}\nΔyield ${signed(d.dYieldBp)} bp\n${d.flow ?? ""}`}),
-    Plot.ruleY([0])
-  ]
-})
+plot(oiSeries("dOI", "ΔOI %{y:+,}").map(t => ({...t, type: "bar"})), oiLayout("Δ contracts", {barmode: "group"}), 330)
 ```
 
 :::
 
-::: {.g-col-12 .g-col-md-6}
+::: {.g-col-12 .g-col-lg-6}
 
 **Monthly volume**
 
 ```{ojs}
-Plot.plot({
-  width: 440, height: 220,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 60,
-  x: xAxis,
-  y: {label: "↑ Traded contracts", grid: true, tickFormat: "~s"},
-  marks: [
-    Plot.barY(months.filter(m => m.volume != null), {x: "month", y: "volume", fill: d => isExpiry(d.month) ? "#1f5fa8" : "#9fb8d8",
-      title: d => `${monthLabel(d.month)}\n${fmt(d.volume)} contracts${isExpiry(d.month) ? "\nexpiry / roll month" : ""}`}),
-    Plot.ruleY([0])
-  ]
-})
+plot(oiSeries("volume", "%{y:,} contracts").map(t => ({...t, type: "bar"})), oiLayout("Traded contracts", {barmode: "group"}), 300)
 ```
 
 :::
 
-::: {.g-col-12 .g-col-md-6}
+::: {.g-col-12 .g-col-lg-6}
 
-**`{ojs} oiCfg.yieldLabel` yield**
+**Underlying yields**
 
 ```{ojs}
-Plot.plot({
-  width: 440, height: 220,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 45,
-  x: xAxis,
-  y: {label: "↑ %", grid: true},
-  marks: [
-    Plot.line(months.filter(m => m.yield != null), {x: "month", y: "yield", stroke: "#1f5fa8", strokeWidth: 2}),
-    Plot.dot(months.filter(m => m.yield != null), {x: "month", y: "yield", fill: "#1f5fa8", r: 2.5,
-      title: d => `${monthLabel(d.month)}: ${d.yield.toFixed(2)}%`})
-  ]
-})
+plot(codes.filter((k, i) => codes.findIndex(j => oiData.contracts[j].yieldLabel === oiData.contracts[k].yieldLabel) === i).map((k, i) => {
+  const c = oiData.contracts[k];
+  return {type: "scatter", mode: "lines+markers", name: c.yieldLabel, x: c.months.map(m => `${m.month}-01`), y: c.months.map(m => m.yield),
+    line: {color: COLORS[(i + 3) % COLORS.length], width: 2}, connectgaps: false,
+    hovertemplate: `${c.yieldLabel} %{x|%b %Y}: %{y:.2f}%<extra></extra>`};
+}), oiLayout("%", {yaxis: {title: {text: "%"}, tickformat: ".1f"}, hovermode: "x unified"}), 300)
 ```
 
 :::
 
 :::
 
+**Open interest by month and contract**
+
+```{ojs}
+html`<div class="table-responsive oi-table"><table class="table table-sm align-middle small flow-table">
+  <thead><tr><th>Month</th>${codes.map(k => html`<th class="text-end">${k}</th>`)}</tr></thead>
+  <tbody>${oiMonths.map(mo => html`<tr>
+    <td>${monthLabel(mo)}${isExpiry(mo) ? "*" : ""}</td>
+    ${codes.map(k => {
+      const c = oiData.contracts[k], i = c.months.findIndex(m => m.month === mo), m = c.months[i], prev = c.months[i - 1];
+      if (!m || m.oi == null) return html`<td class="text-end text-muted">–</td>`;
+      const td = html`<td class="text-end"><div>${compact(m.oi)}</div>
+        <div class="oi-sub">${prev?.oi ? signed(100 * m.dOI / prev.oi, 1) + "%" : "–"}</div></td>`;
+      [td.style.background, td.style.color] = flowStyle(m.flow);
+      td.title = `${k} ${monthLabel(mo)}: OI ${fmt(m.oi)}, ΔOI ${m.dOI == null ? "–" : signed(m.dOI)}, volume ${m.volume == null ? "–" : fmt(m.volume)}, ` +
+        `Δyield ${signed(m.dYieldBp)} bp, ${m.flow ?? "no flow label"}`;
+      return td;
+    })}
+  </tr>`)}</tbody>
+</table></div>
+<p class="small text-muted">Each cell: month-end open interest and its change on the month, shaded by flow. Hover a cell for details.
+* Expiry month: month-end OI is measured after the roll, so falls can reflect positions not rolled.
+Months missing for every contract are not available from Eurex.</p>`
+```
+
 :::
+
 
 ::: {.callout-note collapse="true"}
 ## Data and method

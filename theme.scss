@@ -1,0 +1,62 @@
+/*-- scss:defaults --*/
+// Dark theme shared by every page, layered on Bootswatch Darkly.
+$body-bg: #0d1117;
+$body-color: #c9d1d9;
+$body-secondary-color: #8b949e;
+$headings-color: #f0f6fc;
+$primary: #58a6ff;
+$secondary: #30363d;
+$success: #3fb950;
+$danger: #f85149;
+$link-color: #58a6ff;
+$link-hover-color: #79c0ff;
+$border-color: #30363d;
+$font-family-sans-serif: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+$font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+$headings-font-weight: 600;
+$input-bg: #161b22;
+$input-color: $body-color;
+$input-border-color: #30363d;
+$form-select-bg: #161b22;
+$nav-tabs-border-color: #30363d;
+$nav-tabs-link-active-bg: #161b22;
+$nav-tabs-link-active-border-color: #30363d #30363d #161b22;
+$nav-tabs-link-active-color: #f0f6fc;
+$table-color: $body-color;
+$table-border-color: #21262d;
+$code-color: #ffa657;
+$callout-color-note: #58a6ff;
+
+/*-- scss:rules --*/
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap");
+
+.quarto-title .title { letter-spacing: -0.01em; }
+.quarto-title .subtitle, .text-muted { color: #8b949e !important; }
+.border, .rounded.border { border-color: #30363d !important; }
+.border.rounded { background: #161b22; }
+
+// Tables
+.table { --bs-table-bg: transparent; --bs-table-hover-bg: rgba(88, 166, 255, 0.06); }
+.table thead th { color: #8b949e; font-weight: 500; border-bottom-color: #30363d; }
+.table-primary { --bs-table-bg: rgba(88, 166, 255, 0.14); --bs-table-color: #f0f6fc; }
+
+// Tab panels
+.panel-tabset .tab-content { background: transparent; border-color: #30363d; }
+
+// Observable Inputs
+form[class^="inputs-"] input, form[class^="inputs-"] select, form[class^="inputs-"] textarea {
+  background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px;
+}
+form[class^="inputs-"] input[type="range"] { accent-color: #58a6ff; border: none; background: transparent; }
+form[class^="inputs-"] input[type="radio"] { accent-color: #58a6ff; }
+form[class^="inputs-"] button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; }
+form[class^="inputs-"] button:hover { background: #30363d; }
+
+// Callouts
+.callout { background: #161b22; border-color: #30363d; }
+.callout .callout-header { background: #161b22 !important; }
+
+// Plotly mode bar on dark
+.js-plotly-plot .modebar { background: transparent !important; }
+.js-plotly-plot .modebar-btn path { fill: #8b949e !important; }
+.js-plotly-plot .modebar-btn:hover path, .js-plotly-plot .modebar-btn.active path { fill: #58a6ff !important; }

@@ -4,7 +4,7 @@ subtitle: "Fair value of the net basis, CTD switch probability and option-adjust
 page-layout: full
 format:
   html:
-    theme: cosmo
+    theme: [darkly, theme.scss]
     toc: false
 execute:
   echo: false
@@ -33,6 +33,10 @@ optionAdjustedDV01 = ctdlib.optionAdjustedDV01
 sweep = ctdlib.sweep
 normals = ctdlib.normals
 to32nds = ctdlib.to32nds
+chartlib = import(new URL(`charts.js?v=${Date.now()}`, document.baseURI).href)
+Plotly = require("plotly.js-dist-min@2.35.2")
+plot = (data, layout, height) => chartlib.plot(Plotly, data, layout, height)
+COLORS = chartlib.COLORS
 data = FileAttachment("baskets.json").json()
 MARKETS = ["UST", "Bund", "OAT", "BTP"]
 // The URL hash can name a market (#BTP) or a contract (#IK).
@@ -174,19 +178,18 @@ active = names.filter((n, i) => run.prob[i] > 0 || grid.some(g => g.prob[i] > 0.
 #### Distribution of outcomes at delivery, coloured by CTD
 
 ```{ojs}
-Plot.plot({
-  width: 860,
-  height: 320,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 50,
-  x: {label: "Change in generic yield to delivery (bp) →"},
-  y: {label: "↑ Scenarios", grid: true},
-  color: {domain: active, scheme: "tableau10", legend: true},
-  marks: [
-    Plot.rectY(run.scenarios, Plot.binX({y: "count"}, {x: "dy", fill: "ctd", thresholds: 80})),
-    Plot.ruleY([0])
-  ]
-})
+{
+  const dys = run.scenarios.map(d => d.dy);
+  const [lo, hi] = d3.extent(dys);
+  const xbins = {start: lo, end: hi, size: (hi - lo) / 80 || 1};
+  return plot(active.map((n, i) => ({
+    type: "histogram", name: n, x: run.scenarios.filter(d => d.ctd === n).map(d => d.dy), xbins,
+    marker: {color: COLORS[i % COLORS.length], line: {width: 0}},
+    hovertemplate: `${n}<br>Δy %{x} bp<br>%{y} scenarios<extra></extra>`
+  })), {barmode: "stack", bargap: 0.02,
+    xaxis: {title: {text: "Change in generic yield to delivery (bp)"}},
+    yaxis: {title: {text: "Scenarios"}}}, 340);
+}
 ```
 
 #### CTD probability and fair value of the net basis
@@ -206,7 +209,7 @@ html`<div class="table-responsive basket-table"><table class="table table-sm ali
     <td class="text-end">${b.cf.toFixed(cfg.cf === "given" ? 6 : 4)}</td>
     <td class="text-end">${b.f0.toFixed(3)}</td>
     <td style="min-width: 140px"><div class="d-flex align-items-center gap-2">
-      <div style="background: #1f5fa8; height: 10px; width: ${run.prob[i] * 80}px"></div>
+      <div style="background: #58a6ff; height: 10px; width: ${run.prob[i] * 80}px"></div>
       <span>${(run.prob[i] * 100).toFixed(1)}%</span></div></td>
     <td class="text-end">${run.fvBasis[i].toFixed(3)}</td>
     ${cfg.market === "UST" ? html`<td class="text-end">${to32nds(run.fvBasis[i])}</td>` : ""}
@@ -224,22 +227,17 @@ Expected futures price at delivery: ${run.futures.toFixed(3)}. DV01 per ${ccy}${
 ::: {.g-col-12 .g-col-md-6}
 
 ```{ojs}
-probData = grid.flatMap(g => names.map((n, i) => ({shift: g.shift, bond: n, prob: g.prob[i]}))).filter(d => active.includes(d.bond))
-Plot.plot({
-  width: 440,
-  height: 300,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 45,
-  x: {label: "Shift in today's generic yield (bp) →"},
-  y: {label: "↑ CTD probability", grid: true, percent: true, domain: [0, 100]},
-  color: {domain: active, scheme: "tableau10"},
-  marks: [
-    Plot.ruleX([0], {stroke: "#999", strokeDasharray: "4,3"}),
-    Plot.line(probData, {x: "shift", y: "prob", stroke: "bond", strokeWidth: 2}),
-    Plot.tip(probData.filter(d => d.prob > 0.005),
-      Plot.pointer({x: "shift", y: "prob", title: d => `${d.bond}\n${d.shift >= 0 ? "+" : ""}${d.shift} bp: ${(d.prob * 100).toFixed(0)}%`}))
-  ]
-})
+plot(active.map((n, k) => {
+  const i = names.indexOf(n);
+  return {type: "scatter", mode: "lines", name: n, x: grid.map(g => g.shift), y: grid.map(g => g.prob[i] * 100),
+    line: {color: COLORS[k % COLORS.length], width: 2},
+    hovertemplate: `${n}<br>%{x:+} bp: %{y:.0f}%<extra></extra>`};
+}), {
+  hovermode: "x unified",
+  xaxis: {title: {text: "Shift in today's generic yield (bp)"}},
+  yaxis: {title: {text: "CTD probability (%)"}, range: [0, 100]},
+  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#8b949e", dash: "dot", width: 1}}]
+}, 320)
 ```
 
 :::
@@ -247,24 +245,16 @@ Plot.plot({
 ::: {.g-col-12 .g-col-md-6}
 
 ```{ojs}
-dv01Data = grid.flatMap(g => [
-  {shift: g.shift, series: "Option-adjusted", dv01: g.oaDV01 * perPoint},
-  {shift: g.shift, series: "CTD DV01 / CF", dv01: g.ctdDV01 * perPoint}
-])
-Plot.plot({
-  width: 440,
-  height: 300,
-  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
-  marginLeft: 45,
-  x: {label: "Shift in today's generic yield (bp) →"},
-  y: {label: `↑ DV01 per contract (${ccy})`, grid: true},
-  color: {legend: true, domain: ["Option-adjusted", "CTD DV01 / CF"], range: ["#1f5fa8", "#e15759"]},
-  marks: [
-    Plot.ruleX([0], {stroke: "#999", strokeDasharray: "4,3"}),
-    Plot.line(dv01Data, {x: "shift", y: "dv01", stroke: "series", strokeWidth: 2}),
-    Plot.tip(dv01Data, Plot.pointerX({x: "shift", y: "dv01", stroke: "series", title: d => `${d.series}: ${ccy}${d.dv01.toFixed(1)}`}))
-  ]
-})
+plot([
+  {name: "Option-adjusted", y: grid.map(g => g.oaDV01 * perPoint), color: "#58a6ff"},
+  {name: "CTD DV01 / CF", y: grid.map(g => g.ctdDV01 * perPoint), color: "#f78166"}
+].map(t => ({type: "scatter", mode: "lines", name: t.name, x: grid.map(g => g.shift), y: t.y,
+  line: {color: t.color, width: 2}, hovertemplate: `${t.name}: ${ccy}%{y:.1f}<extra></extra>`})), {
+  hovermode: "x unified",
+  xaxis: {title: {text: "Shift in today's generic yield (bp)"}},
+  yaxis: {title: {text: `DV01 per contract (${ccy})`}},
+  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#8b949e", dash: "dot", width: 1}}]
+}, 320)
 ```
 
 :::
