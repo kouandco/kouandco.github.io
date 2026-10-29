@@ -1,62 +1,81 @@
 /*-- scss:defaults --*/
-// Dark theme shared by every page, layered on Bootswatch Darkly.
-$body-bg: #0d1117;
-$body-color: #c9d1d9;
-$body-secondary-color: #8b949e;
-$headings-color: #f0f6fc;
-$primary: #58a6ff;
-$secondary: #30363d;
-$success: #3fb950;
-$danger: #f85149;
-$link-color: #58a6ff;
-$link-hover-color: #79c0ff;
-$border-color: #30363d;
-$font-family-sans-serif: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-$font-family-monospace: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-$headings-font-weight: 600;
-$input-bg: #161b22;
+// Dark theme shared by every page, layered on Bootswatch Darkly: near-black background, panel cards with
+// hairline borders, violet accent, mint/coral for up/down, system sans with monospace figures.
+$body-bg: #030609;
+$body-color: #e6e9ef;
+$body-secondary-color: #a0a7b4;
+$headings-color: #e6e9ef;
+$primary: #a78bfa;
+$secondary: #11161d;
+$success: #38d39f;
+$danger: #ff6b6b;
+$link-color: #a78bfa;
+$link-hover-color: #c4b5fd;
+$border-color: rgba(255, 255, 255, 0.07);
+$font-family-sans-serif: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif;
+$font-family-monospace: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+$font-size-root: 14px;
+$line-height-base: 1.5;
+$headings-font-weight: 700;
+$h1-font-size: 1.6rem;
+$h2-font-size: 1.35rem;
+$h3-font-size: 1.2rem;
+$h4-font-size: 1.05rem;
+$input-bg: #080d13;
 $input-color: $body-color;
-$input-border-color: #30363d;
-$form-select-bg: #161b22;
-$nav-tabs-border-color: #30363d;
-$nav-tabs-link-active-bg: #161b22;
-$nav-tabs-link-active-border-color: #30363d #30363d #161b22;
-$nav-tabs-link-active-color: #f0f6fc;
+$input-border-color: rgba(255, 255, 255, 0.1);
+$form-select-bg: #080d13;
+$nav-tabs-border-color: rgba(255, 255, 255, 0.07);
+$nav-tabs-link-active-bg: #080d13;
+$nav-tabs-link-active-border-color: rgba(255, 255, 255, 0.07) rgba(255, 255, 255, 0.07) #080d13;
+$nav-tabs-link-active-color: #e6e9ef;
 $table-color: $body-color;
-$table-border-color: #21262d;
-$code-color: #ffa657;
-$callout-color-note: #58a6ff;
+$table-border-color: rgba(255, 255, 255, 0.06);
+$code-color: #c4b5fd;
+$callout-color-note: #a78bfa;
 
 /*-- scss:rules --*/
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400&display=swap");
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+.quarto-title .title { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.01em; }
+.quarto-title .subtitle { font-size: 1.05rem; font-weight: 600; }
+.quarto-title .subtitle, .text-muted { color: #a0a7b4 !important; }
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
 
-.quarto-title .title { letter-spacing: -0.01em; }
-.quarto-title .subtitle, .text-muted { color: #8b949e !important; }
-.border, .rounded.border { border-color: #30363d !important; }
-.border.rounded { background: #161b22; }
+// Panels and cards
+.border, .rounded.border { border-color: rgba(255, 255, 255, 0.07) !important; }
+.border.rounded { background: #080d13; border-radius: 10px !important; }
+
+// Figures in monospace, as in tables and stat tiles
+.table td.text-end, .table th.text-end, .border.rounded .fs-5, .border.rounded .fs-6, .oi-table td { font-family: $font-family-monospace; font-size: 0.92em; }
 
 // Tables
-.table { --bs-table-bg: transparent; --bs-table-hover-bg: rgba(88, 166, 255, 0.06); }
-.table thead th { color: #8b949e; font-weight: 500; border-bottom-color: #30363d; }
-.table-primary { --bs-table-bg: rgba(88, 166, 255, 0.14); --bs-table-color: #f0f6fc; }
+.table { --bs-table-bg: transparent; --bs-table-hover-bg: rgba(167, 139, 250, 0.06); }
+.table thead th { color: #a0a7b4; font-weight: 600; border-bottom-color: rgba(255, 255, 255, 0.1); }
+.table-primary { --bs-table-bg: rgba(124, 92, 255, 0.16); --bs-table-color: #e6e9ef; }
 
-// Tab panels
-.panel-tabset .tab-content { background: transparent; border-color: #30363d; }
+// Tabs
+.nav-tabs .nav-link { color: #a0a7b4; }
+.nav-tabs .nav-link.active { color: #e6e9ef; box-shadow: inset 0 -2px 0 #a78bfa; }
+.panel-tabset .tab-content { background: #070c11; border-color: rgba(255, 255, 255, 0.07); border-radius: 0 0 10px 10px; }
 
-// Observable Inputs
-form[class^="inputs-"] input, form[class^="inputs-"] select, form[class^="inputs-"] textarea {
-  background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px;
+// Form controls (Observable Inputs and others)
+input[type="radio"], input[type="checkbox"], input[type="range"] { accent-color: #a78bfa; }
+input[type="number"], input[type="text"], input[type="date"], select, textarea {
+  background: #080d13 !important; color: #e6e9ef !important; border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: 6px; color-scheme: dark;
 }
-form[class^="inputs-"] input[type="range"] { accent-color: #58a6ff; border: none; background: transparent; }
-form[class^="inputs-"] input[type="radio"] { accent-color: #58a6ff; }
-form[class^="inputs-"] button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; }
-form[class^="inputs-"] button:hover { background: #30363d; }
+textarea { font-family: $font-family-monospace; }
+form button, button[type="submit"] {
+  background: rgba(124, 92, 255, 0.16); color: #e6e9ef; border: 1px solid rgba(124, 92, 255, 0.4); border-radius: 6px;
+}
+form button:hover, button[type="submit"]:hover { background: rgba(124, 92, 255, 0.28); }
 
 // Callouts
-.callout { background: #161b22; border-color: #30363d; }
-.callout .callout-header { background: #161b22 !important; }
+.callout { background: #080d13; border-color: rgba(255, 255, 255, 0.07); }
+.callout .callout-header { background: #080d13 !important; }
 
-// Plotly mode bar on dark
+// Plotly mode bar
 .js-plotly-plot .modebar { background: transparent !important; }
-.js-plotly-plot .modebar-btn path { fill: #8b949e !important; }
-.js-plotly-plot .modebar-btn:hover path, .js-plotly-plot .modebar-btn.active path { fill: #58a6ff !important; }
+.js-plotly-plot .modebar-btn path { fill: #5c6270 !important; }
+.js-plotly-plot .modebar-btn:hover path, .js-plotly-plot .modebar-btn.active path { fill: #a78bfa !important; }

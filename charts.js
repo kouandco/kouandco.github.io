@@ -1,9 +1,10 @@
 // Shared Plotly styling for the site's dark theme. Every chart supports zoom (drag), pan,
 // box select, scroll zoom, double-click to reset and click-to-toggle legend entries.
 
-export const COLORS = ["#58a6ff", "#f78166", "#3fb950", "#d29922", "#bc8cff", "#39c5cf", "#ff7b72", "#a5d6ff", "#ffa657", "#7ee787"];
+export const COLORS = ["#a78bfa", "#38d39f", "#ff6b6b", "#60a5fa", "#fbbf24", "#f472b6", "#22d3ee", "#c4b5fd", "#fb923c", "#94a3b8"];
 
-const AXIS = {gridcolor: "#21262d", zerolinecolor: "#30363d", linecolor: "#30363d", tickcolor: "#30363d", automargin: true};
+const AXIS = {gridcolor: "rgba(255,255,255,0.06)", zerolinecolor: "rgba(255,255,255,0.14)", linecolor: "rgba(255,255,255,0.12)",
+  tickcolor: "rgba(255,255,255,0.12)", automargin: true};
 
 function isObject(x) {
   return x && typeof x === "object" && !Array.isArray(x);
@@ -19,11 +20,11 @@ export function layout(extra = {}) {
   const base = {
     paper_bgcolor: "rgba(0,0,0,0)",
     plot_bgcolor: "rgba(0,0,0,0)",
-    font: {family: "Inter, system-ui, sans-serif", size: 12, color: "#c9d1d9"},
+    font: {family: "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif", size: 12, color: "#a0a7b4"},
     margin: {l: 60, r: 20, t: 30, b: 45},
     legend: {orientation: "h", x: 0, y: 1.02, yanchor: "bottom", font: {size: 11}, bgcolor: "rgba(0,0,0,0)"},
     hovermode: "closest",
-    hoverlabel: {bgcolor: "#161b22", bordercolor: "#30363d", font: {color: "#f0f6fc", family: "Inter, sans-serif"}},
+    hoverlabel: {bgcolor: "rgba(10,17,24,0.98)", bordercolor: "rgba(255,255,255,0.14)", font: {color: "#e6e9ef", family: "ui-monospace, SFMono-Regular, Menlo, monospace"}},
     dragmode: "zoom",
     xaxis: AXIS,
     yaxis: AXIS,

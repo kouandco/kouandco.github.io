@@ -209,7 +209,7 @@ html`<div class="table-responsive basket-table"><table class="table table-sm ali
     <td class="text-end">${b.cf.toFixed(cfg.cf === "given" ? 6 : 4)}</td>
     <td class="text-end">${b.f0.toFixed(3)}</td>
     <td style="min-width: 140px"><div class="d-flex align-items-center gap-2">
-      <div style="background: #58a6ff; height: 10px; width: ${run.prob[i] * 80}px"></div>
+      <div style="background: #a78bfa; height: 10px; width: ${run.prob[i] * 80}px"></div>
       <span>${(run.prob[i] * 100).toFixed(1)}%</span></div></td>
     <td class="text-end">${run.fvBasis[i].toFixed(3)}</td>
     ${cfg.market === "UST" ? html`<td class="text-end">${to32nds(run.fvBasis[i])}</td>` : ""}
@@ -236,7 +236,7 @@ plot(active.map((n, k) => {
   hovermode: "x unified",
   xaxis: {title: {text: "Shift in today's generic yield (bp)"}},
   yaxis: {title: {text: "CTD probability (%)"}, range: [0, 100]},
-  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#8b949e", dash: "dot", width: 1}}]
+  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#5c6270", dash: "dot", width: 1}}]
 }, 320)
 ```
 
@@ -246,14 +246,14 @@ plot(active.map((n, k) => {
 
 ```{ojs}
 plot([
-  {name: "Option-adjusted", y: grid.map(g => g.oaDV01 * perPoint), color: "#58a6ff"},
-  {name: "CTD DV01 / CF", y: grid.map(g => g.ctdDV01 * perPoint), color: "#f78166"}
+  {name: "Option-adjusted", y: grid.map(g => g.oaDV01 * perPoint), color: "#a78bfa"},
+  {name: "CTD DV01 / CF", y: grid.map(g => g.ctdDV01 * perPoint), color: "#ff6b6b"}
 ].map(t => ({type: "scatter", mode: "lines", name: t.name, x: grid.map(g => g.shift), y: t.y,
   line: {color: t.color, width: 2}, hovertemplate: `${t.name}: ${ccy}%{y:.1f}<extra></extra>`})), {
   hovermode: "x unified",
   xaxis: {title: {text: "Shift in today's generic yield (bp)"}},
   yaxis: {title: {text: `DV01 per contract (${ccy})`}},
-  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#8b949e", dash: "dot", width: 1}}]
+  shapes: [{type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: {color: "#5c6270", dash: "dot", width: 1}}]
 }, 320)
 ```
 

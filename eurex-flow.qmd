@@ -20,8 +20,10 @@ execute:
   .flow-table tbody tr { cursor: pointer; }
   .trade-table { max-height: 360px; overflow-y: auto; }
   .trade-table thead th { position: sticky; top: 0; background: var(--bs-body-bg); }
-  .oi-table td { border-bottom: 1px solid #0d1117; }
+  .oi-table td { border-bottom: 1px solid #030609; }
   .oi-sub { font-size: 0.72rem; opacity: 0.8; }
+  .outlier-row td { color: #5c6270 !important; }
+  .outlier-tag { font-size: 0.7rem; padding: 0.05rem 0.4rem; border-radius: 4px; color: #fbbf24; background: rgba(251, 191, 36, 0.12); }
   .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
 </style>
 ```
@@ -96,16 +98,26 @@ withVwap = rows => {
   });
 }
 
-// Drop misreported prints: more than `k` median absolute deviations (and at least `floor`) from the median.
-cleanPrints = (rows, floor, k = 8) => {
+// Outliers are left out of the charts and the VWAP but kept, flagged, in the trade table.
+// Stage 1 (gross misprints): more than `k` median absolute deviations, and at least `floor`, from the series median.
+grossSplit = (rows, floor, k = 8) => {
   const med = d3.median(rows, r => r.v);
   const mad = d3.median(rows, r => Math.abs(r.v - med)) || 0;
   const limit = Math.max(floor, k * mad);
   return {kept: rows.filter(r => Math.abs(r.v - med) <= limit), dropped: rows.filter(r => Math.abs(r.v - med) > limit)};
 }
+// Stage 2 (off-market prints): more than `k` typical deviations, and at least `floor`, from that day's median.
+localSplit = (rows, floor, k = 8) => {
+  const dayMedian = new Map(d3.rollups(rows, g => d3.median(g, r => r.v), r => r.t.slice(0, 10)));
+  const dev = r => Math.abs(r.v - dayMedian.get(r.t.slice(0, 10)));
+  const limit = Math.max(floor, k * (d3.median(rows, dev) || 0));
+  return {kept: rows.filter(r => dev(r) <= limit), dropped: rows.filter(r => dev(r) > limit)};
+}
+withOutliers = (rows, outliers) => [...rows, ...outliers.map(r => ({...r, outlier: true, time: r.t.slice(11, 16)}))]
+  .sort((a, b) => a.t < b.t ? -1 : a.t > b.t ? 1 : 0)
 
-droppedNote = (dropped, unit) => dropped.length ? html`<p class="small text-muted">Excluded as misreported
-  (far from this series' median): ${dropped.map(r => `${r.t.replace("T", " ")} (${r.v.toFixed(0)} ${unit})`).join("; ")}.</p>` : html``
+outlierNote = (n, unit) => n ? html`<p class="small text-muted">${n} print${n > 1 ? "s" : ""} flagged as outliers
+  (far from the series or that day's median) ${n > 1 ? "are" : "is"} left out of the chart and VWAP, and marked in the table below.</p>` : html``
 
 // Stats for the latest trading day in the series.
 tilesFor = (rows, unit, digits) => {
@@ -137,19 +149,19 @@ tradeChart = (rows, unit, view) => {
   for (const r of starts) if (!labelled.length || (r.i - labelled[labelled.length - 1]) * perTrade >= 40) labelled.push(r.i);
   const level = view === "Waterfall"
     ? [{type: "bar", name: "Trade", x: idx, base: rows.map(r => r.prev), y: rows.map(r => (r.v - r.prev) || 1e-9),
-        marker: {color: rows.map(r => r.v > r.prev ? "#3fb950" : r.v < r.prev ? "#f85149" : "#8b949e")},
+        marker: {color: rows.map(r => r.v > r.prev ? "#38d39f" : r.v < r.prev ? "#ff6b6b" : "#5c6270")},
         hovertext: hover, hoverinfo: "text", showlegend: false},
        {type: "scatter", mode: "markers", name: "Print", x: idx, y: rows.map(r => r.v),
-        marker: {symbol: "line-ew-open", size: 7, color: "#f0f6fc", line: {width: 1}}, hoverinfo: "skip", showlegend: false}]
+        marker: {symbol: "line-ew-open", size: 7, color: "#e6e9ef", line: {width: 1}}, hoverinfo: "skip", showlegend: false}]
     : [{type: "scatter", mode: "markers", name: "Trade (size = lots)", x: idx, y: rows.map(r => r.v),
         marker: {size: rows.map(r => r.q), sizemode: "area", sizeref: 2 * d3.max(rows, r => r.q) / 22 ** 2, sizemin: 2,
-          color: "rgba(247,129,102,0.45)", line: {color: "#f78166", width: 1}},
+          color: "rgba(96,165,250,0.35)", line: {color: "#60a5fa", width: 1}},
         hovertext: hover, hoverinfo: "text"}];
   return plot([
     ...level,
-    {type: "scatter", mode: "lines", name: "Day VWAP", x: vx, y: vy, line: {color: "#58a6ff", width: 2, shape: "hv"},
+    {type: "scatter", mode: "lines", name: "Day VWAP", x: vx, y: vy, line: {color: "#a78bfa", width: 2, shape: "hv"},
       connectgaps: false, hoverinfo: "skip"},
-    {type: "bar", name: "Lots", x: idx, y: rows.map(r => r.q), yaxis: "y2", marker: {color: "rgba(88,166,255,0.45)"},
+    {type: "bar", name: "Lots", x: idx, y: rows.map(r => r.q), yaxis: "y2", marker: {color: "rgba(124,92,255,0.35)"},
       hovertext: hover, hoverinfo: "text", showlegend: false}
   ], {
     bargap: 0.15,
@@ -157,13 +169,18 @@ tradeChart = (rows, unit, view) => {
     yaxis: {domain: [0.3, 1], title: {text: unit}},
     yaxis2: {domain: [0, 0.22], title: {text: "Lots"}},
     shapes: starts.slice(1).map(r => ({type: "line", x0: r.i - 0.5, x1: r.i - 0.5, y0: 0, y1: 1, yref: "paper",
-      line: {color: "#30363d", width: 1}}))
+      line: {color: "rgba(255,255,255,0.08)", width: 1}}))
   }, 460);
 }
 
 tradeTable = (rows, cols) => html`<div class="table-responsive trade-table"><table class="table table-sm small">
-  <thead><tr>${cols.map(c => html`<th class="text-end">${c[0]}</th>`)}</tr></thead>
-  <tbody>${[...rows].reverse().map(r => html`<tr>${cols.map(c => html`<td class="text-end">${c[1](r)}</td>`)}</tr>`)}</tbody>
+  <thead><tr><th></th>${cols.map(c => html`<th class="text-end">${c[0]}</th>`)}</tr></thead>
+  <tbody>${[...rows].reverse().map(r => {
+    const tr = html`<tr><td>${r.outlier ? html`<span class="outlier-tag">outlier</span>` : ""}</td>
+      ${cols.map(c => html`<td class="text-end">${c[1](r)}</td>`)}</tr>`;
+    if (r.outlier) tr.className = "outlier-row";
+    return tr;
+  })}</tbody>
 </table></div>`
 ```
 
@@ -180,11 +197,12 @@ viewof efpView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", lab
 ```{ojs}
 efpBond = bondPick === "CTD" ? ctd1 : ctd2
 // Gross basis in cents (0.01 price points): cash price − futures price × conversion factor.
-efpClean = cleanPrints(trades.efp
+efpGross = grossSplit(trades.efp
   .filter(r => r.c === code && r.x === expiry && r.isin === efpBond.id)
   .map(r => ({...r, v: (r.cash - r.f * efpBond.cf) * 100})), 25)
-efpAll = efpClean.kept
-efpRows = withVwap(efpAll)
+efpLocal = localSplit(efpGross.kept, 2)
+efpRows = withVwap(efpLocal.kept)
+efpTable = withOutliers(efpRows, [...efpGross.dropped, ...efpLocal.dropped])
 ```
 
 ```{ojs}
@@ -203,13 +221,13 @@ tradeChart(efpRows, "c", efpView)
 ```
 
 ```{ojs}
-droppedNote(efpClean.dropped, "c")
+outlierNote(efpGross.dropped.length + efpLocal.dropped.length, "c")
 ```
 
 ```{ojs}
-tradeTable(efpRows, [
+tradeTable(efpTable, [
   ["Time", r => r.t.replace("T", " ")], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
-  ["Cash", r => r.cash.toFixed(4)], ["Gross basis (c)", r => r.v.toFixed(1)], ["Day VWAP (c)", r => r.vwap.toFixed(1)]
+  ["Cash", r => r.cash.toFixed(4)], ["Gross basis (c)", r => r.v.toFixed(1)], ["Day VWAP (c)", r => r.outlier ? "–" : r.vwap.toFixed(1)]
 ])
 ```
 
@@ -229,7 +247,7 @@ viewof efsView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", lab
 // The rest are swaps of other tenors (e.g. spot-starting 10-year swaps), shown separately.
 isMatched = r => Math.abs(parseDate(`${r.e.slice(0, 4)}-${r.e.slice(4, 6)}-${r.e.slice(6)}`) - ctd1.maturity) <= 45 * 864e5
   && r.s >= bk.delivery.replaceAll("-", "").slice(0, 6) + "01"
-efsClean = cleanPrints(trades.efs
+efsGross = grossSplit(trades.efs
   .filter(r => r.c === code && r.x === expiry && isMatched(r) === (efsType === "Matched to CTD"))
   .map(r => {
     const y = yieldFromPrice(ctd1.price, r.f * ctd1.cf);
@@ -246,11 +264,13 @@ twoMeans = values => {
   }
   return {lo, hi, cut: (lo + hi) / 2, split: hi - lo >= 8};
 }
-efsClusters = twoMeans(efsClean.kept.map(r => r.v))
+efsClusters = twoMeans(efsGross.kept.map(r => r.v))
 efsAll = efsType === "Matched to CTD" && efsClusters.split
-  ? efsClean.kept.filter(r => (r.v > efsClusters.cut) === (efsLeg === "Upper"))
-  : efsClean.kept
-efsRows = withVwap(efsAll)
+  ? efsGross.kept.filter(r => (r.v > efsClusters.cut) === (efsLeg === "Upper"))
+  : efsGross.kept
+efsLocal = localSplit(efsAll, 3)
+efsRows = withVwap(efsLocal.kept)
+efsTable = withOutliers(efsRows, [...efsGross.dropped, ...efsLocal.dropped])
 ```
 
 ```{ojs}
@@ -275,14 +295,14 @@ tradeChart(efsRows, "bp", efsView)
 ```
 
 ```{ojs}
-droppedNote(efsClean.dropped, "bp")
+outlierNote(efsGross.dropped.length + efsLocal.dropped.length, "bp")
 ```
 
 ```{ojs}
-tradeTable(efsRows, [
+tradeTable(efsTable, [
   ["Time", r => r.t.replace("T", " ")], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
   ["Implied CTD yield", r => r.y.toFixed(3) + "%"], ["Swap rate", r => r.rate.toFixed(4) + "%"],
-  ["Swap", r => `${r.s.slice(2, 4)}/${r.s.slice(4, 6)}/${r.s.slice(6)} → ${r.e.slice(2, 4)}/${r.e.slice(4, 6)}/${r.e.slice(6)}`], ["Invoice spread (bp)", r => r.v.toFixed(1)], ["Day VWAP (bp)", r => r.vwap.toFixed(1)]
+  ["Swap", r => `${r.s.slice(2, 4)}/${r.s.slice(4, 6)}/${r.s.slice(6)} → ${r.e.slice(2, 4)}/${r.e.slice(4, 6)}/${r.e.slice(6)}`], ["Invoice spread (bp)", r => r.v.toFixed(1)], ["Day VWAP (bp)", r => r.outlier ? "–" : r.vwap.toFixed(1)]
 ])
 ```
 
@@ -291,12 +311,12 @@ tradeTable(efsRows, [
 ```{ojs}
 FLOWS = ["New longs", "Short covering", "New shorts", "Long liquidation"]
 FLOW_STYLE = ({
-  "New longs": ["rgba(63,185,80,0.85)", "#ffffff"],
-  "Short covering": ["rgba(63,185,80,0.28)", "#aff5b4"],
-  "New shorts": ["rgba(248,81,73,0.85)", "#ffffff"],
-  "Long liquidation": ["rgba(248,81,73,0.28)", "#ffc1bb"]
+  "New longs": ["rgba(56,211,159,0.85)", "#ffffff"],
+  "Short covering": ["rgba(56,211,159,0.28)", "#a7f3d0"],
+  "New shorts": ["rgba(255,107,107,0.85)", "#ffffff"],
+  "Long liquidation": ["rgba(255,107,107,0.28)", "#fecaca"]
 })
-flowStyle = f => FLOW_STYLE[f] ?? ["#21262d", "#8b949e"]
+flowStyle = f => FLOW_STYLE[f] ?? ["rgba(255,255,255,0.05)", "#a0a7b4"]
 badge = f => {
   const el = document.createElement("span");
   el.className = "flow-badge";
