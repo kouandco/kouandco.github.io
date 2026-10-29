@@ -1,0 +1,475 @@
+---
+title: "Eurex Flow"
+subtitle: "Basis trades (EFP), invoice spreads (EFS) and positioning in Eurex government bond futures"
+page-layout: full
+format:
+  html:
+    theme: cosmo
+    toc: false
+execute:
+  echo: false
+---
+
+[← Home](index.html) · [CTD Monte Carlo](ctd.html)
+
+```{=html}
+<style>
+  .grid > * { min-width: 0; }
+  .flow-badge { display: inline-block; padding: 0.1rem 0.45rem; border-radius: 0.25rem; font-size: 0.78rem; white-space: nowrap; }
+  .flow-table td, .flow-table th { white-space: nowrap; }
+  .flow-table tbody tr { cursor: pointer; }
+  .trade-table { max-height: 360px; overflow-y: auto; }
+  .trade-table thead th { position: sticky; top: 0; background: var(--bs-body-bg); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.5rem; margin-bottom: 0.75rem; }
+</style>
+```
+
+```{ojs}
+import {parseDate, setup, yieldFromPrice} from "./ctd.js"
+trades = FileAttachment("eurex_trades.json").json()
+baskets = FileAttachment("baskets.json").json()
+oiData = FileAttachment("eurex_flow.json").json()
+codes = ["DU", "OE", "RX", "UB", "OAT", "BTS", "IK"]
+fmt = d3.format(",")
+signed = (x, digits = 0) => x == null || isNaN(x) ? "–" : `${x > 0 ? "+" : ""}${x.toFixed(digits)}`
+dayLabel = d => `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)}`
+tile = (label, value, note = "") => html`<div class="border rounded p-2">
+  <div class="small text-muted">${label}</div><div class="fs-6 fw-semibold">${value}</div>
+  <div class="small text-muted">${note}</div></div>`
+```
+
+```{ojs}
+hash = decodeURIComponent(location.hash.slice(1))
+viewof code = Inputs.radio(codes, {
+  value: codes.includes(hash) ? hash : "RX",
+  label: "Contract",
+  format: k => `${k}`
+})
+viewof day = Inputs.select([...trades.days].reverse(), {label: "Trade date", format: dayLabel})
+```
+
+```{ojs}
+{
+  history.replaceState(null, "", `#${code}`);
+  return html`<p class="small text-muted mb-2">${baskets.contracts[code].name} · data updated ${trades.updated} ·
+  times as published by Eurex</p>`;
+}
+```
+
+```{ojs}
+// Today's CTD and 2nd CTD for the contract: deliverables ranked by price / CF at delivery (see the CTD page).
+bk = baskets.contracts[code]
+ranked = {
+  const d = parseDate(bk.delivery);
+  const model = setup({
+    basket: bk.bonds.map(b => ({id: b.id, name: b.name, coupon: b.coupon / 100, maturity: parseDate(b.maturity),
+      y0: b.yield / 100, beta: b.beta, cf: b.cf})),
+    analysisDate: parseDate(bk.asOf.split("/").reverse().join("-")),
+    deliveryDate: d, firstDeliveryDay: d, freq: bk.freq, cfMethod: "eurex"
+  });
+  return [...model.bonds].sort((a, b) => a.f0 - b.f0);
+}
+ctd1 = ranked[0]
+ctd2 = ranked[1]
+expiry = bk.delivery.slice(0, 7)
+```
+
+```{ojs}
+// Shared views. `rows`: {t, q, v, ...} for one day, in time order; `all`: every day for the history chart.
+withVwap = (rows, prevClose) => {
+  let pq = 0, q = 0;
+  return rows.map((r, i) => {
+    pq += r.v * r.q; q += r.q;
+    return {...r, i, time: r.t.slice(11, 16), date: new Date(r.t), vwap: pq / q,
+      prev: i ? rows[i - 1].v : prevClose ?? r.v};
+  });
+}
+
+// Drop misreported prints: more than `k` median absolute deviations (and at least `floor`) from the median.
+cleanPrints = (rows, floor, k = 8) => {
+  const med = d3.median(rows, r => r.v);
+  const mad = d3.median(rows, r => Math.abs(r.v - med)) || 0;
+  const limit = Math.max(floor, k * mad);
+  return {kept: rows.filter(r => Math.abs(r.v - med) <= limit), dropped: rows.filter(r => Math.abs(r.v - med) > limit)};
+}
+
+dayRows = (all, d) => {
+  const today = all.filter(r => r.t.startsWith(dayLabel(d)));
+  const before = all.filter(r => r.t < dayLabel(d));
+  return withVwap(today, before.length ? before[before.length - 1].v : undefined);
+}
+
+droppedNote = (dropped, unit) => dropped.length ? html`<p class="small text-muted">Excluded as misreported
+  (far from this series' median): ${dropped.map(r => `${r.t.replace("T", " ")} (${r.v.toFixed(0)} ${unit})`).join("; ")}.</p>` : html``
+
+dailySummary = all => d3.rollups(all, g => {
+  const q = d3.sum(g, r => r.q);
+  return {day: g[0].t.slice(0, 10), vwap: d3.sum(g, r => r.v * r.q) / q, lo: d3.min(g, r => r.v), hi: d3.max(g, r => r.v),
+    last: g[g.length - 1].v, q, n: g.length};
+}, r => r.t.slice(0, 10)).map(d => d[1])
+
+tilesFor = (rows, unit, digits) => {
+  if (!rows.length) return html`<p class="text-muted">No trades on ${dayLabel(day)}.</p>`;
+  const r = rows[rows.length - 1];
+  return html`<div class="tiles">
+    ${tile("Trades", fmt(rows.length))}
+    ${tile("Lots", fmt(d3.sum(rows, d => d.q)))}
+    ${tile("VWAP", `${r.vwap.toFixed(digits)} ${unit}`)}
+    ${tile("Last", `${r.v.toFixed(digits)} ${unit}`, r.time)}
+    ${tile("Range", `${d3.min(rows, d => d.v).toFixed(digits)} – ${d3.max(rows, d => d.v).toFixed(digits)}`)}
+  </div>`;
+}
+
+intradayChart = (rows, unit, view) => {
+  if (!rows.length) return html``;
+  const common = {width: 900, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55};
+  const every = Math.max(1, Math.ceil(rows.length / 12));
+  const xBand = {type: "band", label: null, domain: rows.map(r => r.i), padding: 0.2,
+    tickFormat: i => i % every ? "" : rows[i].time};
+  const title = r => `${r.time}  ${r.q} lots\n${r.v.toFixed(2)} ${unit} (${signed(r.v - r.prev, 2)})\nVWAP ${r.vwap.toFixed(2)}`;
+  const level = view === "Waterfall"
+    ? Plot.plot({...common, height: 300, x: xBand, y: {label: `↑ ${unit}`, grid: true, zero: false},
+        color: {domain: ["Up", "Down", "Unch."], range: ["#2e7d32", "#c62828", "#9e9e9e"], legend: true},
+        marks: [
+          Plot.barY(rows, {x: "i", y1: "prev", y2: "v", fill: r => r.v > r.prev ? "Up" : r.v < r.prev ? "Down" : "Unch.",
+            insetTop: 0, insetBottom: 0, title}),
+          Plot.tickY(rows, {x: "i", y: "v", stroke: "#222", strokeWidth: 1}),
+          Plot.line(rows, {x: "i", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"}),
+          Plot.text(rows.slice(-1), {x: "i", y: "vwap", text: () => "VWAP", dx: 4, dy: -8, fill: "#1f5fa8", textAnchor: "end"})
+        ]})
+    : Plot.plot({...common, height: 300, x: {type: "time", label: null}, y: {label: `↑ ${unit}`, grid: true, zero: false},
+        r: {range: [2, 18]},
+        marks: [
+          Plot.line(rows, {x: "date", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"}),
+          Plot.dot(rows, {x: "date", y: "v", r: "q", fill: "#e15759", fillOpacity: 0.5, stroke: "#e15759", title}),
+          Plot.text(rows.slice(-1), {x: "date", y: "vwap", text: () => "VWAP", dx: 4, dy: -8, fill: "#1f5fa8", textAnchor: "end"})
+        ]});
+  const volume = Plot.plot({...common, height: 130, marginTop: 5,
+    x: view === "Waterfall" ? xBand : {type: "time", label: null},
+    y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
+    marks: view === "Waterfall"
+      ? [Plot.barY(rows, {x: "i", y: "q", fill: "#9fb8d8", title}), Plot.ruleY([0])]
+      : [Plot.rectY(rows, Plot.binX({y: "sum"}, {x: "date", y: "q", interval: d3.timeMinute.every(15), fill: "#9fb8d8"})), Plot.ruleY([0])]});
+  return html`<div>${level}${volume}</div>`;
+}
+
+historyChart = (all, unit) => {
+  const days = dailySummary(all);
+  if (!days.length) return html``;
+  const common = {width: 900, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55,
+    x: {type: "band", label: null, domain: days.map(d => d.day), padding: 0.25, tickFormat: d => d.slice(5)}};
+  return html`<div>
+  ${Plot.plot({...common, height: 240, y: {label: `↑ ${unit}`, grid: true, zero: false},
+    marks: [
+      Plot.ruleX(days, {x: "day", y1: "lo", y2: "hi", stroke: "#bbb", strokeWidth: 6}),
+      Plot.line(days, {x: "day", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2}),
+      Plot.dot(days, {x: "day", y: "vwap", fill: "#1f5fa8", r: 3,
+        title: d => `${d.day}\nVWAP ${d.vwap.toFixed(2)} ${unit}\nrange ${d.lo.toFixed(2)} – ${d.hi.toFixed(2)}\n${fmt(d.q)} lots, ${d.n} trades`}),
+      Plot.dot(days.filter(d => d.day === dayLabel(day)), {x: "day", y: "vwap", r: 6, stroke: "#e15759", strokeWidth: 2})
+    ]})}
+  ${Plot.plot({...common, height: 110, marginTop: 5, y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
+    marks: [Plot.barY(days, {x: "day", y: "q", fill: d => d.day === dayLabel(day) ? "#e15759" : "#9fb8d8"}), Plot.ruleY([0])]})}
+  </div>`;
+}
+
+tradeTable = (rows, cols) => html`<div class="table-responsive trade-table"><table class="table table-sm small">
+  <thead><tr>${cols.map(c => html`<th class="text-end">${c[0]}</th>`)}</tr></thead>
+  <tbody>${[...rows].reverse().map(r => html`<tr>${cols.map(c => html`<td class="text-end">${c[1](r)}</td>`)}</tr>`)}</tbody>
+</table></div>`
+```
+
+::: {.panel-tabset}
+
+### Basis trades (EFP)
+
+```{ojs}
+viewof bondPick = Inputs.radio(["CTD", "2nd CTD"], {value: "CTD", label: "Bond",
+  format: k => `${k}: ${(k === "CTD" ? ctd1 : ctd2).name}`})
+viewof efpView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Intraday view"})
+```
+
+```{ojs}
+efpBond = bondPick === "CTD" ? ctd1 : ctd2
+// Gross basis in cents (0.01 price points): cash price − futures price × conversion factor.
+efpClean = cleanPrints(trades.efp
+  .filter(r => r.c === code && r.x === expiry && r.isin === efpBond.id)
+  .map(r => ({...r, v: (r.cash - r.f * efpBond.cf) * 100})), 25)
+efpAll = efpClean.kept
+efpDay = dayRows(efpAll, day)
+```
+
+```{ojs}
+html`<p class="small text-muted">${efpBond.name} (${efpBond.id}), CF ${efpBond.cf.toFixed(6)}.
+Gross basis = cash price − futures × CF, in cents (0.01 points).</p>`
+```
+
+```{ojs}
+tilesFor(efpDay, "c", 1)
+```
+
+**Intraday: gross basis, running VWAP and volume**
+
+```{ojs}
+intradayChart(efpDay, "c", efpView)
+```
+
+**Daily: VWAP (line), high–low range (grey) and volume**
+
+```{ojs}
+historyChart(efpAll, "c")
+```
+
+```{ojs}
+droppedNote(efpClean.dropped, "c")
+```
+
+```{ojs}
+tradeTable(efpDay, [
+  ["Time", r => r.t.slice(11)], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
+  ["Cash", r => r.cash.toFixed(4)], ["Gross basis (c)", r => r.v.toFixed(1)], ["VWAP (c)", r => r.vwap.toFixed(1)]
+])
+```
+
+### Invoice spreads (EFS)
+
+```{ojs}
+viewof efsType = Inputs.radio(["Matched to CTD", "Other tenors"], {value: "Matched to CTD", label: "Swap",
+  format: k => k === "Matched to CTD" ? "Matched to CTD (invoice spread)" : "Other tenors"})
+viewof efsLeg = Inputs.radio(["Lower", "Upper"], {value: "Lower", label: "Cluster",
+  format: k => k === "Lower" ? "Lower (likely €STR OIS)" : "Upper (likely 6m Euribor)", disabled: efsType !== "Matched to CTD"})
+viewof efsView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Intraday view"})
+```
+
+```{ojs}
+// Invoice spread in bp: swap fixed rate − CTD yield implied by the futures price (forward price = futures × CF).
+// Matched EFS: swap starts around delivery and ends within 45 days of the CTD's maturity.
+// The rest are swaps of other tenors (e.g. spot-starting 10-year swaps), shown separately.
+isMatched = r => Math.abs(parseDate(`${r.e.slice(0, 4)}-${r.e.slice(4, 6)}-${r.e.slice(6)}`) - ctd1.maturity) <= 45 * 864e5
+  && r.s >= bk.delivery.replaceAll("-", "").slice(0, 6) + "01"
+efsClean = cleanPrints(trades.efs
+  .filter(r => r.c === code && r.x === expiry && isMatched(r) === (efsType === "Matched to CTD"))
+  .map(r => {
+    const y = yieldFromPrice(ctd1.price, r.f * ctd1.cf);
+    return {...r, y: y * 100, v: (r.rate / 100 - y) * 10000};
+  }), 40)
+// Matched EFS print in two clusters ~15–30 bp apart on the same swap dates, consistent with €STR OIS vs 6m Euribor
+// floating legs (the trade file has no index field). Split them with a 1-D two-means so each VWAP is like-for-like.
+twoMeans = values => {
+  let lo = d3.quantile(values, 0.1), hi = d3.quantile(values, 0.9);
+  for (let k = 0; k < 20; k++) {
+    const mid = (lo + hi) / 2;
+    lo = d3.mean(values.filter(v => v <= mid)) ?? lo;
+    hi = d3.mean(values.filter(v => v > mid)) ?? hi;
+  }
+  return {lo, hi, cut: (lo + hi) / 2, split: hi - lo >= 8};
+}
+efsClusters = twoMeans(efsClean.kept.map(r => r.v))
+efsAll = efsType === "Matched to CTD" && efsClusters.split
+  ? efsClean.kept.filter(r => (r.v > efsClusters.cut) === (efsLeg === "Upper"))
+  : efsClean.kept
+efsDay = dayRows(efsAll, day)
+```
+
+```{ojs}
+html`<p class="small text-muted">${efsType === "Matched to CTD"
+  ? html`Invoice spread = fixed rate of a forward swap from delivery to the ${ctd1.name} maturity − the CTD yield implied by the
+    futures price (forward price = futures × ${ctd1.cf.toFixed(6)}, settling ${bk.delivery}), in bp.`
+  : html`EFS against swaps that are not matched to the CTD (other start or end dates, e.g. spot-starting 10-year swaps):
+    swap rate − futures-implied ${ctd1.name} yield, in bp. The tenor mismatch adds curve slope, so compare like tenors.`}
+Positive: swap above the futures-implied yield.
+${efsType === "Matched to CTD" && efsClusters.split ? `Matched trades fall in two clusters (centres ${efsClusters.lo.toFixed(1)} and
+${efsClusters.hi.toFixed(1)} bp), most likely €STR OIS and 6m Euribor swaps; Eurex's file does not say which, so this split is inferred.` : ""}</p>`
+```
+
+```{ojs}
+tilesFor(efsDay, "bp", 1)
+```
+
+**Intraday: invoice spread, running VWAP and volume**
+
+```{ojs}
+intradayChart(efsDay, "bp", efsView)
+```
+
+**Daily: VWAP (line), high–low range (grey) and volume**
+
+```{ojs}
+historyChart(efsAll, "bp")
+```
+
+```{ojs}
+droppedNote(efsClean.dropped, "bp")
+```
+
+```{ojs}
+tradeTable(efsDay, [
+  ["Time", r => r.t.slice(11)], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
+  ["Implied CTD yield", r => r.y.toFixed(3) + "%"], ["Swap rate", r => r.rate.toFixed(4) + "%"],
+  ["Swap", r => `${r.s.slice(2, 4)}/${r.s.slice(4, 6)}/${r.s.slice(6)} → ${r.e.slice(2, 4)}/${r.e.slice(4, 6)}/${r.e.slice(6)}`], ["Invoice spread (bp)", r => r.v.toFixed(1)], ["VWAP (bp)", r => r.vwap.toFixed(1)]
+])
+```
+
+### Monthly open interest
+
+```{ojs}
+FLOWS = ["New longs", "Short covering", "New shorts", "Long liquidation"]
+FLOW_COLORS = ["#2e7d32", "#81c784", "#c62828", "#ef9a9a"]
+flowColor = f => f ? FLOW_COLORS[FLOWS.indexOf(f)] : "#bdbdbd"
+badge = f => {
+  const el = document.createElement("span");
+  el.className = "flow-badge";
+  el.style.background = flowColor(f);
+  el.style.color = f === "New longs" || f === "New shorts" ? "white" : "#222";
+  el.textContent = f ?? "n/a";
+  return el;
+}
+latest = c => [...c.months].reverse().find(m => m.oi != null)
+monthLabel = m => new Date(`${m}-01T00:00:00Z`).toLocaleString("en-GB", {month: "short", year: "numeric", timeZone: "UTC"}).replace(/^Sept/, "Sep")
+isExpiry = m => ["03", "06", "09", "12"].includes(m.slice(5))
+oiCfg = oiData.contracts[code]
+months = oiCfg.months
+// Every month on the axis, so gaps in Eurex's data show as gaps.
+xAxis = ({type: "band", label: null, domain: months.map(m => m.month), padding: 0.15,
+  tickFormat: m => ["01", "04", "07", "10"].includes(m.slice(5)) ? monthLabel(m) : ""})
+```
+
+```{ojs}
+html`<div class="table-responsive"><table class="table table-sm table-hover align-middle small flow-table">
+  <thead><tr>
+    <th>Contract</th><th>Month</th><th class="text-end">Open interest</th><th class="text-end">Δ OI</th><th class="text-end">Δ OI %</th>
+    <th class="text-end">OI vs year ago</th><th class="text-end">Volume</th><th class="text-end">Δ yield (bp)</th><th>Flow</th>
+  </tr></thead>
+  <tbody>${codes.map(k => {
+    const c = oiData.contracts[k], m = latest(c);
+    const prev = c.months[c.months.indexOf(m) - 1];
+    const yearAgo = c.months.find(x => x.month === `${+m.month.slice(0, 4) - 1}${m.month.slice(4)}`);
+    const row = html`<tr class=${k === code ? "table-primary" : ""}>
+      <td><strong>${k}</strong> <span class="text-muted">${c.name}</span></td>
+      <td>${monthLabel(m.month)}${isExpiry(m.month) ? "*" : ""}</td>
+      <td class="text-end">${fmt(m.oi)}</td>
+      <td class="text-end">${m.dOI == null ? "–" : signed(m.dOI).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</td>
+      <td class="text-end">${prev?.oi ? signed(100 * m.dOI / prev.oi, 1) + "%" : "–"}</td>
+      <td class="text-end">${yearAgo?.oi ? signed(100 * (m.oi / yearAgo.oi - 1), 0) + "%" : "–"}</td>
+      <td class="text-end">${m.volume == null ? "–" : fmt(m.volume)}</td>
+      <td class="text-end">${signed(m.dYieldBp)}</td>
+      <td>${badge(m.flow)}</td>
+    </tr>`;
+    row.onclick = () => { viewof code.value = k; viewof code.dispatchEvent(new Event("input", {bubbles: true})); };
+    return row;
+  })}</tbody>
+</table></div>
+<p class="small text-muted">Click a row to switch contract. * Expiry month: month-end open interest is measured after the
+roll into the next contract, so falls can reflect positions not rolled rather than outright liquidation.
+Flow is n/a when the yield for that month is not yet published. Rising OI with futures up (yields down) = new longs;
+OI up, futures down = new shorts; OI down, futures up = short covering; OI down, futures down = long liquidation.</p>`
+```
+
+```{ojs}
+html`<div class="d-flex flex-wrap gap-2 mb-2">${FLOWS.map(badge)}${badge(null)}</div>`
+```
+
+::: {.grid}
+
+::: {.g-col-12 .g-col-md-6}
+
+**Month-end open interest**
+
+```{ojs}
+Plot.plot({
+  width: 440, height: 260,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 60,
+  x: xAxis,
+  y: {label: "↑ Contracts", grid: true, tickFormat: "~s"},
+  marks: [
+    Plot.barY(months.filter(m => m.oi != null), {x: "month", y: "oi", fill: d => flowColor(d.flow),
+      title: d => `${monthLabel(d.month)}\nOI ${fmt(d.oi)}\n${d.flow ?? "no flow label"}`}),
+    Plot.ruleY([0])
+  ]
+})
+```
+
+:::
+
+::: {.g-col-12 .g-col-md-6}
+
+**Monthly change in open interest**
+
+```{ojs}
+Plot.plot({
+  width: 440, height: 260,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 60,
+  x: xAxis,
+  y: {label: "↑ Δ contracts", grid: true, tickFormat: "~s"},
+  marks: [
+    Plot.barY(months.filter(m => m.dOI != null), {x: "month", y: "dOI", fill: d => flowColor(d.flow),
+      title: d => `${monthLabel(d.month)}\nΔOI ${signed(d.dOI)}\nΔyield ${signed(d.dYieldBp)} bp\n${d.flow ?? ""}`}),
+    Plot.ruleY([0])
+  ]
+})
+```
+
+:::
+
+::: {.g-col-12 .g-col-md-6}
+
+**Monthly volume**
+
+```{ojs}
+Plot.plot({
+  width: 440, height: 220,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 60,
+  x: xAxis,
+  y: {label: "↑ Traded contracts", grid: true, tickFormat: "~s"},
+  marks: [
+    Plot.barY(months.filter(m => m.volume != null), {x: "month", y: "volume", fill: d => isExpiry(d.month) ? "#1f5fa8" : "#9fb8d8",
+      title: d => `${monthLabel(d.month)}\n${fmt(d.volume)} contracts${isExpiry(d.month) ? "\nexpiry / roll month" : ""}`}),
+    Plot.ruleY([0])
+  ]
+})
+```
+
+:::
+
+::: {.g-col-12 .g-col-md-6}
+
+**`{ojs} oiCfg.yieldLabel` yield**
+
+```{ojs}
+Plot.plot({
+  width: 440, height: 220,
+  style: {fontSize: "12px", maxWidth: "100%", height: "auto"},
+  marginLeft: 45,
+  x: xAxis,
+  y: {label: "↑ %", grid: true},
+  marks: [
+    Plot.line(months.filter(m => m.yield != null), {x: "month", y: "yield", stroke: "#1f5fa8", strokeWidth: 2}),
+    Plot.dot(months.filter(m => m.yield != null), {x: "month", y: "yield", fill: "#1f5fa8", r: 2.5,
+      title: d => `${monthLabel(d.month)}: ${d.yield.toFixed(2)}%`})
+  ]
+})
+```
+
+:::
+
+:::
+
+:::
+
+::: {.callout-note collapse="true"}
+## Data and method
+
+- **EFP and EFS trades:** Eurex [EFP-Fin](https://www.eurex.com/ex-en/data/trading-files/efpf) and
+  [EFS](https://www.eurex.com/ex-en/data/trading-files/efs) trade files. Eurex lists only about 20 trading days, so every
+  file is archived locally and the data refreshed hourly. Only the front contract (December 2026) is shown.
+- **CTD and 2nd CTD:** deliverables ranked by price / conversion factor at today's yields, as on the
+  [CTD page](ctd.html). EFPs against any other bond are excluded.
+- **Gross basis** = cash price − futures × CF (cents). It includes carry to delivery, so it drifts down towards the
+  net basis as delivery approaches.
+- **Invoice spread** = swap fixed rate − the CTD yield implied by the futures price, treating futures × CF as the
+  CTD's forward price on the delivery date. Swap tenors in an EFS vary, so compare spreads across trades with similar tenors.
+- **Monthly open interest:** [Eurex monthly statistics](https://www.eurex.com/ex-en/data/statistics/monthly-statistics),
+  with yields from the Bundesbank (Germany, month-end) and FRED (France and Italy, monthly averages).
+:::

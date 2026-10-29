@@ -194,3 +194,13 @@ export function to32nds(x) {
   const rem = ticks - whole * 32;
   return `${sign}${whole}-${rem.toFixed(1).padStart(4, "0")}`;
 }
+
+// Yield (decimal) at which a bond's clean-price function returns `target`, by bisection.
+export function yieldFromPrice(price, target, lo = -0.05, hi = 0.25) {
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2;
+    if (price(mid) > target) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
+}

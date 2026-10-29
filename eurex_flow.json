@@ -1,0 +1,1132 @@
+{
+ "built": "2026-10-29",
+ "contracts": {
+  "DU": {
+   "product": "FGBS",
+   "name": "Euro-Schatz",
+   "market": "Bund",
+   "yieldLabel": "German 2y",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 2272382,
+     "volume": 12951615,
+     "dOI": null,
+     "yield": 1.77,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 1910077,
+     "volume": 17946719,
+     "dOI": -362305,
+     "yield": 1.84,
+     "dYieldBp": 7.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-07",
+     "oi": 1965184,
+     "volume": 12289561,
+     "dOI": 55107,
+     "yield": 1.95,
+     "dYieldBp": 11.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-08",
+     "oi": 2332326,
+     "volume": 10409471,
+     "dOI": 367142,
+     "yield": 1.92,
+     "dYieldBp": -3.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2025-09",
+     "oi": 2156460,
+     "volume": 18914573,
+     "dOI": -175866,
+     "yield": 2.01,
+     "dYieldBp": 9.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 1.97,
+     "dYieldBp": -4.0,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.01,
+     "dYieldBp": 4.0,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.11,
+     "dYieldBp": 10.0,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.07,
+     "dYieldBp": -4.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.02,
+     "dYieldBp": -5.0,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.62,
+     "dYieldBp": 60.0,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 2506257,
+     "volume": 17870380,
+     "dOI": null,
+     "yield": 2.71,
+     "dYieldBp": 9.0,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 2871083,
+     "volume": 17269193,
+     "dOI": 364826,
+     "yield": 2.53,
+     "dYieldBp": -18.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2026-06",
+     "oi": 2389645,
+     "volume": 27183926,
+     "dOI": -481438,
+     "yield": 2.5,
+     "dYieldBp": -3.0,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 2609340,
+     "volume": 16988622,
+     "dOI": 219695,
+     "yield": 2.76,
+     "dYieldBp": 26.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 2696311,
+     "volume": 14503247,
+     "dOI": 86971,
+     "yield": 2.89,
+     "dYieldBp": 13.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 2918622,
+     "volume": 37016114,
+     "dOI": 222311,
+     "yield": 3.24,
+     "dYieldBp": 35.0,
+     "flow": "New shorts"
+    }
+   ]
+  },
+  "OE": {
+   "product": "FGBM",
+   "name": "Euro-Bobl",
+   "market": "Bund",
+   "yieldLabel": "German 5y",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 1327642,
+     "volume": 14573788,
+     "dOI": null,
+     "yield": 2.08,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 1261824,
+     "volume": 19485093,
+     "dOI": -65818,
+     "yield": 2.15,
+     "dYieldBp": 7.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-07",
+     "oi": 1313864,
+     "volume": 15468406,
+     "dOI": 52040,
+     "yield": 2.25,
+     "dYieldBp": 10.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-08",
+     "oi": 1519867,
+     "volume": 13618156,
+     "dOI": 206003,
+     "yield": 2.21,
+     "dYieldBp": -4.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2025-09",
+     "oi": 1317626,
+     "volume": 22866009,
+     "dOI": -202241,
+     "yield": 2.28,
+     "dYieldBp": 7.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.24,
+     "dYieldBp": -4.0,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.28,
+     "dYieldBp": 4.0,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.44,
+     "dYieldBp": 16.0,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.38,
+     "dYieldBp": -6.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.25,
+     "dYieldBp": -13.0,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.72,
+     "dYieldBp": 47.0,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 1470235,
+     "volume": 18863999,
+     "dOI": null,
+     "yield": 2.8,
+     "dYieldBp": 8.0,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 1708873,
+     "volume": 19670873,
+     "dOI": 238638,
+     "yield": 2.64,
+     "dYieldBp": -16.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2026-06",
+     "oi": 1499768,
+     "volume": 24663864,
+     "dOI": -209105,
+     "yield": 2.57,
+     "dYieldBp": -7.0,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 1695286,
+     "volume": 19199649,
+     "dOI": 195518,
+     "yield": 2.86,
+     "dYieldBp": 29.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 2068967,
+     "volume": 20025601,
+     "dOI": 373681,
+     "yield": 3.02,
+     "dYieldBp": 16.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 1633155,
+     "volume": 41165917,
+     "dOI": -435812,
+     "yield": 3.36,
+     "dYieldBp": 34.0,
+     "flow": "Long liquidation"
+    }
+   ]
+  },
+  "RX": {
+   "product": "FGBL",
+   "name": "Euro-Bund",
+   "market": "Bund",
+   "yieldLabel": "German 10y",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 1376828,
+     "volume": 20289427,
+     "dOI": null,
+     "yield": 2.59,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 1321198,
+     "volume": 23345511,
+     "dOI": -55630,
+     "yield": 2.65,
+     "dYieldBp": 6.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-07",
+     "oi": 1348470,
+     "volume": 19443612,
+     "dOI": 27272,
+     "yield": 2.75,
+     "dYieldBp": 10.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-08",
+     "oi": 1428151,
+     "volume": 17214786,
+     "dOI": 79681,
+     "yield": 2.76,
+     "dYieldBp": 1.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-09",
+     "oi": 1391861,
+     "volume": 27420543,
+     "dOI": -36290,
+     "yield": 2.78,
+     "dYieldBp": 2.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.71,
+     "dYieldBp": -7.0,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.77,
+     "dYieldBp": 6.0,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.94,
+     "dYieldBp": 17.0,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.92,
+     "dYieldBp": -2.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 2.76,
+     "dYieldBp": -16.0,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.1,
+     "dYieldBp": 34.0,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 1527762,
+     "volume": 24160264,
+     "dOI": null,
+     "yield": 3.18,
+     "dYieldBp": 8.0,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 1668867,
+     "volume": 25793798,
+     "dOI": 141105,
+     "yield": 3.04,
+     "dYieldBp": -14.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2026-06",
+     "oi": 1553607,
+     "volume": 31232336,
+     "dOI": -115260,
+     "yield": 2.93,
+     "dYieldBp": -11.0,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 1695630,
+     "volume": 24527592,
+     "dOI": 142023,
+     "yield": 3.21,
+     "dYieldBp": 28.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 2083917,
+     "volume": 21511028,
+     "dOI": 388287,
+     "yield": 3.37,
+     "dYieldBp": 16.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 1816407,
+     "volume": 40344612,
+     "dOI": -267510,
+     "yield": 3.64,
+     "dYieldBp": 27.0,
+     "flow": "Long liquidation"
+    }
+   ]
+  },
+  "UB": {
+   "product": "FGBX",
+   "name": "Euro-Buxl",
+   "market": "Bund",
+   "yieldLabel": "German 30y",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 259127,
+     "volume": 2538009,
+     "dOI": null,
+     "yield": 3.0,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 251637,
+     "volume": 3573827,
+     "dOI": -7490,
+     "yield": 3.05,
+     "dYieldBp": 5.0,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-07",
+     "oi": 265920,
+     "volume": 2251956,
+     "dOI": 14283,
+     "yield": 3.17,
+     "dYieldBp": 12.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-08",
+     "oi": 394012,
+     "volume": 2177452,
+     "dOI": 128092,
+     "yield": 3.35,
+     "dYieldBp": 18.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-09",
+     "oi": 294165,
+     "volume": 3958633,
+     "dOI": -99847,
+     "yield": 3.31,
+     "dYieldBp": -4.0,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.25,
+     "dYieldBp": -6.0,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.37,
+     "dYieldBp": 12.0,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.54,
+     "dYieldBp": 17.0,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.58,
+     "dYieldBp": 4.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.44,
+     "dYieldBp": -14.0,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.57,
+     "dYieldBp": 13.0,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 341674,
+     "volume": 3398439,
+     "dOI": null,
+     "yield": 3.7,
+     "dYieldBp": 13.0,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 427184,
+     "volume": 3772257,
+     "dOI": 85510,
+     "yield": 3.62,
+     "dYieldBp": -8.0,
+     "flow": "New longs"
+    },
+    {
+     "month": "2026-06",
+     "oi": 349130,
+     "volume": 4506394,
+     "dOI": -78054,
+     "yield": 3.52,
+     "dYieldBp": -10.0,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 377269,
+     "volume": 3446472,
+     "dOI": 28139,
+     "yield": 3.76,
+     "dYieldBp": 24.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 522314,
+     "volume": 3754533,
+     "dOI": 145045,
+     "yield": 3.9,
+     "dYieldBp": 14.0,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 381836,
+     "volume": 6852589,
+     "dOI": -140478,
+     "yield": 3.99,
+     "dYieldBp": 9.0,
+     "flow": "Long liquidation"
+    }
+   ]
+  },
+  "OAT": {
+   "product": "FOAT",
+   "name": "Euro-OAT",
+   "market": "OAT",
+   "yieldLabel": "French 10y (monthly avg)",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 592455,
+     "volume": 5585887,
+     "dOI": null,
+     "yield": 3.261,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 541757,
+     "volume": 6821464,
+     "dOI": -50698,
+     "yield": 3.236,
+     "dYieldBp": -2.4,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2025-07",
+     "oi": 570925,
+     "volume": 4703313,
+     "dOI": 29168,
+     "yield": 3.347,
+     "dYieldBp": 11.1,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-08",
+     "oi": 742683,
+     "volume": 4873862,
+     "dOI": 171758,
+     "yield": 3.406,
+     "dYieldBp": 5.8,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-09",
+     "oi": 598248,
+     "volume": 7116964,
+     "dOI": -144435,
+     "yield": 3.517,
+     "dYieldBp": 11.2,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.438,
+     "dYieldBp": -7.9,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.439,
+     "dYieldBp": 0.1,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.554,
+     "dYieldBp": 11.6,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.503,
+     "dYieldBp": -5.1,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.353,
+     "dYieldBp": -14.9,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.601,
+     "dYieldBp": 24.8,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 553408,
+     "volume": 5497170,
+     "dOI": null,
+     "yield": 3.675,
+     "dYieldBp": 7.4,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 624413,
+     "volume": 5726897,
+     "dOI": 71005,
+     "yield": 3.742,
+     "dYieldBp": 6.7,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-06",
+     "oi": 631244,
+     "volume": 7870458,
+     "dOI": 6831,
+     "yield": 3.671,
+     "dYieldBp": -7.1,
+     "flow": "New longs"
+    },
+    {
+     "month": "2026-07",
+     "oi": 642627,
+     "volume": 6106179,
+     "dOI": 11383,
+     "yield": 3.885,
+     "dYieldBp": 21.4,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 807834,
+     "volume": 5523171,
+     "dOI": 165207,
+     "yield": 4.031,
+     "dYieldBp": 14.6,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 761149,
+     "volume": 11897244,
+     "dOI": -46685,
+     "yield": 4.477,
+     "dYieldBp": 44.6,
+     "flow": "Long liquidation"
+    }
+   ]
+  },
+  "BTS": {
+   "product": "FBTS",
+   "name": "Short-Term Euro-BTP",
+   "market": "BTP",
+   "yieldLabel": "Italian 10y (monthly avg)",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 603719,
+     "volume": 4023320,
+     "dOI": null,
+     "yield": 3.629,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 548037,
+     "volume": 4770136,
+     "dOI": -55682,
+     "yield": 3.501,
+     "dYieldBp": -12.8,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2025-07",
+     "oi": 521360,
+     "volume": 2974115,
+     "dOI": -26677,
+     "yield": 3.537,
+     "dYieldBp": 3.6,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-08",
+     "oi": 542324,
+     "volume": 2874047,
+     "dOI": 20964,
+     "yield": 3.538,
+     "dYieldBp": 0.1,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-09",
+     "oi": 404131,
+     "volume": 4571452,
+     "dOI": -138193,
+     "yield": 3.559,
+     "dYieldBp": 2.1,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.442,
+     "dYieldBp": -11.7,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.459,
+     "dYieldBp": 1.7,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.552,
+     "dYieldBp": 9.3,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.492,
+     "dYieldBp": -6.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.388,
+     "dYieldBp": -10.4,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.733,
+     "dYieldBp": 34.5,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 416308,
+     "volume": 3932821,
+     "dOI": null,
+     "yield": 3.818,
+     "dYieldBp": 8.5,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 478777,
+     "volume": 4745174,
+     "dOI": 62469,
+     "yield": 3.839,
+     "dYieldBp": 2.1,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-06",
+     "oi": 374168,
+     "volume": 5702753,
+     "dOI": -104609,
+     "yield": 3.734,
+     "dYieldBp": -10.5,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 391200,
+     "volume": 4312655,
+     "dOI": 17032,
+     "yield": 3.881,
+     "dYieldBp": 14.7,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-08",
+     "oi": 376453,
+     "volume": 3617085,
+     "dOI": -14747,
+     "yield": 3.986,
+     "dYieldBp": 10.5,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2026-09",
+     "oi": 403017,
+     "volume": 7317142,
+     "dOI": 26564,
+     "yield": null,
+     "dYieldBp": null,
+     "flow": null
+    }
+   ]
+  },
+  "IK": {
+   "product": "FBTP",
+   "name": "Euro-BTP",
+   "market": "BTP",
+   "yieldLabel": "Italian 10y (monthly avg)",
+   "months": [
+    {
+     "month": "2025-05",
+     "oi": 539616,
+     "volume": 6948936,
+     "dOI": null,
+     "yield": 3.629,
+     "dYieldBp": null,
+     "flow": null
+    },
+    {
+     "month": "2025-06",
+     "oi": 547599,
+     "volume": 8373451,
+     "dOI": 7983,
+     "yield": 3.501,
+     "dYieldBp": -12.8,
+     "flow": "New longs"
+    },
+    {
+     "month": "2025-07",
+     "oi": 517312,
+     "volume": 5996157,
+     "dOI": -30287,
+     "yield": 3.537,
+     "dYieldBp": 3.6,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-08",
+     "oi": 528082,
+     "volume": 5190232,
+     "dOI": 10770,
+     "yield": 3.538,
+     "dYieldBp": 0.1,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2025-09",
+     "oi": 499290,
+     "volume": 7983614,
+     "dOI": -28792,
+     "yield": 3.559,
+     "dYieldBp": 2.1,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2025-10",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.442,
+     "dYieldBp": -11.7,
+     "flow": null
+    },
+    {
+     "month": "2025-11",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.459,
+     "dYieldBp": 1.7,
+     "flow": null
+    },
+    {
+     "month": "2025-12",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.552,
+     "dYieldBp": 9.3,
+     "flow": null
+    },
+    {
+     "month": "2026-01",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.492,
+     "dYieldBp": -6.0,
+     "flow": null
+    },
+    {
+     "month": "2026-02",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.388,
+     "dYieldBp": -10.4,
+     "flow": null
+    },
+    {
+     "month": "2026-03",
+     "oi": null,
+     "volume": null,
+     "dOI": null,
+     "yield": 3.733,
+     "dYieldBp": 34.5,
+     "flow": null
+    },
+    {
+     "month": "2026-04",
+     "oi": 578872,
+     "volume": 7190932,
+     "dOI": null,
+     "yield": 3.818,
+     "dYieldBp": 8.5,
+     "flow": null
+    },
+    {
+     "month": "2026-05",
+     "oi": 627771,
+     "volume": 6940933,
+     "dOI": 48899,
+     "yield": 3.839,
+     "dYieldBp": 2.1,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-06",
+     "oi": 579898,
+     "volume": 8986823,
+     "dOI": -47873,
+     "yield": 3.734,
+     "dYieldBp": -10.5,
+     "flow": "Short covering"
+    },
+    {
+     "month": "2026-07",
+     "oi": 546072,
+     "volume": 7370311,
+     "dOI": -33826,
+     "yield": 3.881,
+     "dYieldBp": 14.7,
+     "flow": "Long liquidation"
+    },
+    {
+     "month": "2026-08",
+     "oi": 546962,
+     "volume": 5943926,
+     "dOI": 890,
+     "yield": 3.986,
+     "dYieldBp": 10.5,
+     "flow": "New shorts"
+    },
+    {
+     "month": "2026-09",
+     "oi": 595994,
+     "volume": 11510157,
+     "dOI": 49032,
+     "yield": null,
+     "dYieldBp": null,
+     "flow": null
+    }
+   ]
+  }
+ }
+}

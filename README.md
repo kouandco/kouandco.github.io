@@ -30,3 +30,24 @@ git add -A && git commit -m "Refresh CTD data" && git push
 
 `build_baskets.py` targets the December 2026 contracts (`UST_MONTH`, `EUREX_DELIVERY`);
 roll those constants forward at each expiry.
+
+## Eurex flow page
+
+`eurex-flow.qmd` shows EFP basis trades against the CTD and 2nd CTD, EFS invoice spreads, and monthly
+open interest, volume and positioning for DU, OE, RX, UB, OAT, BTS and IK.
+
+EFP and EFS trades: `update_eurex_trades.py` archives Eurex's daily trade files in `../eurex_data/`
+(Eurex only lists about 20 days) and rebuilds `eurex_trades.json`. The page reads that file on load,
+so after an update only a commit and push is needed, no re-render. To run it hourly, install the
+launchd job saved in `../eurex_data/com.seankou.eurex-trades.plist`.
+
+Monthly open interest:
+Eurex only keeps the latest five monthly statistics files online, so `build_eurex_flow.py` stores every
+month it reads in `eurex_flow_history.csv`; run it each month (Eurex publishes early in the following month)
+to keep extending the history:
+
+```bash
+../.venv/bin/python build_eurex_flow.py
+quarto render eurex-flow.qmd
+git add -A && git commit -m "Refresh Eurex flow" && git push
+```

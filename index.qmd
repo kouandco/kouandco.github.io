@@ -13,7 +13,7 @@ jupyter: python3
 ---
 
 ::: {.small}
-See also: [Bond futures CTD Monte Carlo](ctd.html), an interactive model of the fair value of the net basis.
+See also: [Bond futures CTD Monte Carlo](ctd.html), an interactive model of the fair value of the net basis, and [Eurex flow](eurex-flow.html), basis (EFP) and invoice spread (EFS) trades and positioning in Eurex bond futures.
 :::
 
 ```{python}
