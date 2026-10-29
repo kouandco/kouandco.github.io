@@ -23,7 +23,16 @@ execute:
 ```
 
 ```{ojs}
-import {parseBasket, parseDate, setup, simulate, optionAdjustedDV01, sweep, normals, to32nds} from "./ctd.js"
+// Loaded at runtime with a fresh URL so a cached older ctd.js is never mixed with this page.
+ctdlib = import(new URL(`ctd.js?v=${Date.now()}`, document.baseURI).href)
+parseBasket = ctdlib.parseBasket
+parseDate = ctdlib.parseDate
+setup = ctdlib.setup
+simulate = ctdlib.simulate
+optionAdjustedDV01 = ctdlib.optionAdjustedDV01
+sweep = ctdlib.sweep
+normals = ctdlib.normals
+to32nds = ctdlib.to32nds
 data = FileAttachment("baskets.json").json()
 MARKETS = ["UST", "Bund", "OAT", "BTP"]
 // The URL hash can name a market (#BTP) or a contract (#IK).

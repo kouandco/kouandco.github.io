@@ -25,8 +25,12 @@ execute:
 ```
 
 ```{ojs}
-import {parseDate, setup, yieldFromPrice} from "./ctd.js"
-trades = FileAttachment("eurex_trades.json").json()
+// Loaded at runtime with a fresh URL so a cached older ctd.js or trade file is never mixed with this page.
+ctdlib = import(new URL(`ctd.js?v=${Date.now()}`, document.baseURI).href)
+parseDate = ctdlib.parseDate
+setup = ctdlib.setup
+yieldFromPrice = ctdlib.yieldFromPrice
+trades = fetch(`eurex_trades.json?v=${Date.now()}`).then(r => r.json())
 baskets = FileAttachment("baskets.json").json()
 oiData = FileAttachment("eurex_flow.json").json()
 codes = ["DU", "OE", "RX", "UB", "OAT", "BTS", "IK"]
@@ -45,7 +49,6 @@ viewof code = Inputs.radio(codes, {
   label: "Contract",
   format: k => `${k}`
 })
-viewof day = Inputs.select([...trades.days].reverse(), {label: "Trade date", format: dayLabel})
 ```
 
 ```{ojs}
@@ -75,13 +78,15 @@ expiry = bk.delivery.slice(0, 7)
 ```
 
 ```{ojs}
-// Shared views. `rows`: {t, q, v, ...} for one day, in time order; `all`: every day for the history chart.
-withVwap = (rows, prevClose) => {
-  let pq = 0, q = 0;
+// Shared views. All trades of a series are shown in sequence; VWAP and its running total restart each day.
+withVwap = rows => {
+  let pq = 0, q = 0, day = null;
   return rows.map((r, i) => {
+    const d = r.t.slice(0, 10);
+    if (d !== day) { pq = 0; q = 0; day = d; }
     pq += r.v * r.q; q += r.q;
-    return {...r, i, time: r.t.slice(11, 16), date: new Date(r.t), vwap: pq / q,
-      prev: i ? rows[i - 1].v : prevClose ?? r.v};
+    return {...r, i, day: d, time: r.t.slice(11, 16), vwap: pq / q, prev: i ? rows[i - 1].v : r.v,
+      first: i === 0 || rows[i - 1].t.slice(0, 10) !== d};
   });
 }
 
@@ -93,12 +98,6 @@ cleanPrints = (rows, floor, k = 8) => {
   return {kept: rows.filter(r => Math.abs(r.v - med) <= limit), dropped: rows.filter(r => Math.abs(r.v - med) > limit)};
 }
 
-dayRows = (all, d) => {
-  const today = all.filter(r => r.t.startsWith(dayLabel(d)));
-  const before = all.filter(r => r.t < dayLabel(d));
-  return withVwap(today, before.length ? before[before.length - 1].v : undefined);
-}
-
 droppedNote = (dropped, unit) => dropped.length ? html`<p class="small text-muted">Excluded as misreported
   (far from this series' median): ${dropped.map(r => `${r.t.replace("T", " ")} (${r.v.toFixed(0)} ${unit})`).join("; ")}.</p>` : html``
 
@@ -108,48 +107,49 @@ dailySummary = all => d3.rollups(all, g => {
     last: g[g.length - 1].v, q, n: g.length};
 }, r => r.t.slice(0, 10)).map(d => d[1])
 
+// Stats for the latest trading day in the series.
 tilesFor = (rows, unit, digits) => {
-  if (!rows.length) return html`<p class="text-muted">No trades on ${dayLabel(day)}.</p>`;
-  const r = rows[rows.length - 1];
+  if (!rows.length) return html`<p class="text-muted">No trades in this series.</p>`;
+  const r = rows[rows.length - 1], today = rows.filter(d => d.day === r.day);
   return html`<div class="tiles">
-    ${tile("Trades", fmt(rows.length))}
-    ${tile("Lots", fmt(d3.sum(rows, d => d.q)))}
+    ${tile("Latest day", r.day, `${fmt(today.length)} trades`)}
+    ${tile("Lots", fmt(d3.sum(today, d => d.q)))}
     ${tile("VWAP", `${r.vwap.toFixed(digits)} ${unit}`)}
     ${tile("Last", `${r.v.toFixed(digits)} ${unit}`, r.time)}
-    ${tile("Range", `${d3.min(rows, d => d.v).toFixed(digits)} – ${d3.max(rows, d => d.v).toFixed(digits)}`)}
+    ${tile("Day range", `${d3.min(today, d => d.v).toFixed(digits)} – ${d3.max(today, d => d.v).toFixed(digits)}`)}
   </div>`;
 }
 
-intradayChart = (rows, unit, view) => {
+// Every trade in sequence across the whole history: level (waterfall or bubbles), the day's running VWAP
+// (restarting each morning) and lots. Grey rules mark the start of each day.
+tradeChart = (rows, unit, view) => {
   if (!rows.length) return html``;
-  const common = {width: 900, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55};
-  const every = Math.max(1, Math.ceil(rows.length / 12));
-  const xBand = {type: "band", label: null, domain: rows.map(r => r.i), padding: 0.2,
-    tickFormat: i => i % every ? "" : rows[i].time};
-  const title = r => `${r.time}  ${r.q} lots\n${r.v.toFixed(2)} ${unit} (${signed(r.v - r.prev, 2)})\nVWAP ${r.vwap.toFixed(2)}`;
-  const level = view === "Waterfall"
-    ? Plot.plot({...common, height: 300, x: xBand, y: {label: `↑ ${unit}`, grid: true, zero: false},
-        color: {domain: ["Up", "Down", "Unch."], range: ["#2e7d32", "#c62828", "#9e9e9e"], legend: true},
-        marks: [
-          Plot.barY(rows, {x: "i", y1: "prev", y2: "v", fill: r => r.v > r.prev ? "Up" : r.v < r.prev ? "Down" : "Unch.",
-            insetTop: 0, insetBottom: 0, title}),
-          Plot.tickY(rows, {x: "i", y: "v", stroke: "#222", strokeWidth: 1}),
-          Plot.line(rows, {x: "i", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"}),
-          Plot.text(rows.slice(-1), {x: "i", y: "vwap", text: () => "VWAP", dx: 4, dy: -8, fill: "#1f5fa8", textAnchor: "end"})
-        ]})
-    : Plot.plot({...common, height: 300, x: {type: "time", label: null}, y: {label: `↑ ${unit}`, grid: true, zero: false},
-        r: {range: [2, 18]},
-        marks: [
-          Plot.line(rows, {x: "date", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"}),
-          Plot.dot(rows, {x: "date", y: "v", r: "q", fill: "#e15759", fillOpacity: 0.5, stroke: "#e15759", title}),
-          Plot.text(rows.slice(-1), {x: "date", y: "vwap", text: () => "VWAP", dx: 4, dy: -8, fill: "#1f5fa8", textAnchor: "end"})
-        ]});
-  const volume = Plot.plot({...common, height: 130, marginTop: 5,
-    x: view === "Waterfall" ? xBand : {type: "time", label: null},
-    y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
+  const width = 900;
+  const common = {width, style: {fontSize: "12px", maxWidth: "100%", height: "auto"}, marginLeft: 55, marginRight: 20};
+  const starts = rows.filter(r => r.first);
+  // Label a day's first trade only when it is at least 40px past the previous label.
+  const perTrade = (width - 75) / rows.length;
+  const labelled = new Set();
+  let lastLabel = -Infinity;
+  for (const r of starts) if ((r.i - lastLabel) * perTrade >= 40) { labelled.add(r.i); lastLabel = r.i; }
+  const x = {type: "band", label: null, domain: rows.map(r => r.i), padding: 0.2,
+    tickFormat: i => labelled.has(i) ? rows[i].day.slice(5) : "", tickSize: 0};
+  const title = r => `${r.day} ${r.time}  ${fmt(r.q)} lots\n${r.v.toFixed(2)} ${unit} (${signed(r.v - r.prev, 2)})\nday VWAP ${r.vwap.toFixed(2)}`;
+  const dayRules = Plot.ruleX(starts.slice(1), {x: "i", stroke: "#ccc", dx: -3});
+  const vwap = Plot.line(rows, {x: "i", y: "vwap", z: "day", stroke: "#1f5fa8", strokeWidth: 2, curve: "step-after"});
+  const level = Plot.plot({...common, height: 300, x, y: {label: `↑ ${unit}`, grid: true, zero: false},
+    color: {domain: ["Up", "Down", "Unch."], range: ["#2e7d32", "#c62828", "#9e9e9e"], legend: view === "Waterfall"},
     marks: view === "Waterfall"
-      ? [Plot.barY(rows, {x: "i", y: "q", fill: "#9fb8d8", title}), Plot.ruleY([0])]
-      : [Plot.rectY(rows, Plot.binX({y: "sum"}, {x: "date", y: "q", interval: d3.timeMinute.every(15), fill: "#9fb8d8"})), Plot.ruleY([0])]});
+      ? [dayRules,
+         Plot.barY(rows, {x: "i", y1: "prev", y2: "v", insetLeft: 0, insetRight: 0, fill: r => r.v > r.prev ? "Up" : r.v < r.prev ? "Down" : "Unch.", title}),
+         Plot.tickY(rows, {x: "i", y: "v", stroke: "#222", strokeWidth: 1}),
+         vwap]
+      : [dayRules,
+         vwap,
+         Plot.dot(rows, {x: "i", y: "v", r: "q", fill: "#e15759", fillOpacity: 0.45, stroke: "#e15759", title})],
+    r: {range: [2, 14]}});
+  const volume = Plot.plot({...common, height: 120, marginTop: 5, x, y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
+    marks: [dayRules, Plot.barY(rows, {x: "i", y: "q", fill: "#9fb8d8", title}), Plot.ruleY([0])]});
   return html`<div>${level}${volume}</div>`;
 }
 
@@ -165,10 +165,10 @@ historyChart = (all, unit) => {
       Plot.line(days, {x: "day", y: "vwap", stroke: "#1f5fa8", strokeWidth: 2}),
       Plot.dot(days, {x: "day", y: "vwap", fill: "#1f5fa8", r: 3,
         title: d => `${d.day}\nVWAP ${d.vwap.toFixed(2)} ${unit}\nrange ${d.lo.toFixed(2)} – ${d.hi.toFixed(2)}\n${fmt(d.q)} lots, ${d.n} trades`}),
-      Plot.dot(days.filter(d => d.day === dayLabel(day)), {x: "day", y: "vwap", r: 6, stroke: "#e15759", strokeWidth: 2})
+      Plot.dot(days.filter(d => d.day === days[days.length - 1].day), {x: "day", y: "vwap", r: 6, stroke: "#e15759", strokeWidth: 2})
     ]})}
   ${Plot.plot({...common, height: 110, marginTop: 5, y: {label: "↑ Lots", grid: true, tickFormat: "~s"},
-    marks: [Plot.barY(days, {x: "day", y: "q", fill: d => d.day === dayLabel(day) ? "#e15759" : "#9fb8d8"}), Plot.ruleY([0])]})}
+    marks: [Plot.barY(days, {x: "day", y: "q", fill: d => d.day === days[days.length - 1].day ? "#e15759" : "#9fb8d8"}), Plot.ruleY([0])]})}
   </div>`;
 }
 
@@ -185,7 +185,7 @@ tradeTable = (rows, cols) => html`<div class="table-responsive trade-table"><tab
 ```{ojs}
 viewof bondPick = Inputs.radio(["CTD", "2nd CTD"], {value: "CTD", label: "Bond",
   format: k => `${k}: ${(k === "CTD" ? ctd1 : ctd2).name}`})
-viewof efpView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Intraday view"})
+viewof efpView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Trade view"})
 ```
 
 ```{ojs}
@@ -195,7 +195,7 @@ efpClean = cleanPrints(trades.efp
   .filter(r => r.c === code && r.x === expiry && r.isin === efpBond.id)
   .map(r => ({...r, v: (r.cash - r.f * efpBond.cf) * 100})), 25)
 efpAll = efpClean.kept
-efpDay = dayRows(efpAll, day)
+efpRows = withVwap(efpAll)
 ```
 
 ```{ojs}
@@ -204,13 +204,13 @@ Gross basis = cash price − futures × CF, in cents (0.01 points).</p>`
 ```
 
 ```{ojs}
-tilesFor(efpDay, "c", 1)
+tilesFor(efpRows, "c", 1)
 ```
 
-**Intraday: gross basis, running VWAP and volume**
+**All trades: gross basis, daily VWAP (resets each morning) and lots**
 
 ```{ojs}
-intradayChart(efpDay, "c", efpView)
+tradeChart(efpRows, "c", efpView)
 ```
 
 **Daily: VWAP (line), high–low range (grey) and volume**
@@ -224,9 +224,9 @@ droppedNote(efpClean.dropped, "c")
 ```
 
 ```{ojs}
-tradeTable(efpDay, [
-  ["Time", r => r.t.slice(11)], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
-  ["Cash", r => r.cash.toFixed(4)], ["Gross basis (c)", r => r.v.toFixed(1)], ["VWAP (c)", r => r.vwap.toFixed(1)]
+tradeTable(efpRows, [
+  ["Time", r => r.t.replace("T", " ")], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
+  ["Cash", r => r.cash.toFixed(4)], ["Gross basis (c)", r => r.v.toFixed(1)], ["Day VWAP (c)", r => r.vwap.toFixed(1)]
 ])
 ```
 
@@ -237,7 +237,7 @@ viewof efsType = Inputs.radio(["Matched to CTD", "Other tenors"], {value: "Match
   format: k => k === "Matched to CTD" ? "Matched to CTD (invoice spread)" : "Other tenors"})
 viewof efsLeg = Inputs.radio(["Lower", "Upper"], {value: "Lower", label: "Cluster",
   format: k => k === "Lower" ? "Lower (likely €STR OIS)" : "Upper (likely 6m Euribor)", disabled: efsType !== "Matched to CTD"})
-viewof efsView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Intraday view"})
+viewof efsView = Inputs.radio(["Waterfall", "Bubbles"], {value: "Waterfall", label: "Trade view"})
 ```
 
 ```{ojs}
@@ -267,7 +267,7 @@ efsClusters = twoMeans(efsClean.kept.map(r => r.v))
 efsAll = efsType === "Matched to CTD" && efsClusters.split
   ? efsClean.kept.filter(r => (r.v > efsClusters.cut) === (efsLeg === "Upper"))
   : efsClean.kept
-efsDay = dayRows(efsAll, day)
+efsRows = withVwap(efsAll)
 ```
 
 ```{ojs}
@@ -282,13 +282,13 @@ ${efsClusters.hi.toFixed(1)} bp), most likely €STR OIS and 6m Euribor swaps; E
 ```
 
 ```{ojs}
-tilesFor(efsDay, "bp", 1)
+tilesFor(efsRows, "bp", 1)
 ```
 
-**Intraday: invoice spread, running VWAP and volume**
+**All trades: invoice spread, daily VWAP (resets each morning) and lots**
 
 ```{ojs}
-intradayChart(efsDay, "bp", efsView)
+tradeChart(efsRows, "bp", efsView)
 ```
 
 **Daily: VWAP (line), high–low range (grey) and volume**
@@ -302,10 +302,10 @@ droppedNote(efsClean.dropped, "bp")
 ```
 
 ```{ojs}
-tradeTable(efsDay, [
-  ["Time", r => r.t.slice(11)], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
+tradeTable(efsRows, [
+  ["Time", r => r.t.replace("T", " ")], ["Lots", r => fmt(r.q)], ["Futures", r => r.f.toFixed(3)],
   ["Implied CTD yield", r => r.y.toFixed(3) + "%"], ["Swap rate", r => r.rate.toFixed(4) + "%"],
-  ["Swap", r => `${r.s.slice(2, 4)}/${r.s.slice(4, 6)}/${r.s.slice(6)} → ${r.e.slice(2, 4)}/${r.e.slice(4, 6)}/${r.e.slice(6)}`], ["Invoice spread (bp)", r => r.v.toFixed(1)], ["VWAP (bp)", r => r.vwap.toFixed(1)]
+  ["Swap", r => `${r.s.slice(2, 4)}/${r.s.slice(4, 6)}/${r.s.slice(6)} → ${r.e.slice(2, 4)}/${r.e.slice(4, 6)}/${r.e.slice(6)}`], ["Invoice spread (bp)", r => r.v.toFixed(1)], ["Day VWAP (bp)", r => r.vwap.toFixed(1)]
 ])
 ```
 
