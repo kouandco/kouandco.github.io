@@ -99,10 +99,12 @@ export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "
         "aria-label": `${p.label} ${yTitle}`, "aria-valuenow": p.y.toFixed(yDigits) });
       gp.append(svg("circle", { cx: sx(p.x), cy: sy(p.y), r: 12, fill: "transparent" }));
       gp.append(svg("circle", { cx: sx(p.x), cy: sy(p.y), r: 6, fill: "#ffd24d", stroke: "#000", "stroke-width": 1 }));
-      const anchor = i === 0 ? "start" : i === points.length - 1 ? "end" : "middle";
-      // Labels of points closer than ~90px to the previous one go below the dot.
-      const crowded = i > 0 && i % 2 === 1 && sx(p.x) - sx(points[i - 1].x) < 90;
-      const lab = svg("text", { x: sx(p.x) + (i === 0 ? -4 : i === points.length - 1 ? 4 : 0), y: sy(p.y) + (crowded ? 20 : -11),
+      // A point may set its own label side (anchor "end" = left of the dot, "start" = right); otherwise end points
+      // label inwards and labels of points crowding the previous one go below the dot.
+      const anchor = p.anchor ?? (i === 0 ? "start" : i === points.length - 1 ? "end" : "middle");
+      const crowded = !p.anchor && i > 0 && i % 2 === 1 && sx(p.x) - sx(points[i - 1].x) < 90;
+      const dx = p.anchor === "end" ? -9 : p.anchor === "start" ? 9 : i === 0 ? -4 : i === points.length - 1 ? 4 : 0;
+      const lab = svg("text", { x: sx(p.x) + dx, y: sy(p.y) + (crowded ? 20 : p.anchor ? 18 : -11),
         "text-anchor": anchor, fill: "#ffd24d", "font-size": 11,
         "font-family": "IBM Plex Mono, monospace" });
       lab.textContent = `${p.label} ${format(p)}`;

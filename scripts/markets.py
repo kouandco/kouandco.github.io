@@ -93,7 +93,8 @@ def ust():
         print(f"  FedInvest {day}: {len(px)} notes and bonds")
         time.sleep(0.5)
     if rows:
-        hist = pd.concat([hist, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
+        # Holidays come back empty; keep them as blank rows so they are not queried again.
+        hist = pd.concat([hist, pd.DataFrame.from_dict(rows, orient="index").reindex(list(rows))]).sort_index()
     hist = hist[hist.index >= pd.Timestamp(start)]
     if static.term.isna().any():
         terms = treasury_terms()
@@ -121,14 +122,17 @@ def us_repo():
     url = ("https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/"
            f"{year}/all?type=daily_treasury_yield_curve&field_tdr_date_value={year}&page&_format=csv")
     bills = pd.read_csv(io.StringIO(get(url).text), parse_dates=["Date"]).sort_values("Date").iloc[-1]
-    points = [{"label": "O/N", "t": 1 / 365, "rate": float(sofr["percentRate"])}]
+    on = float(sofr["percentRate"])
+    points = [{"label": "O/N", "t": 1 / 365, "rate": on}]
+    # Bills yield more than GC repo, so only their slope is used: term point = SOFR + (bill − 1-month bill).
+    anchor = float(bills["1 Mo"])
     for col, label, t in (("1 Mo", "1M", 1 / 12), ("2 Mo", "2M", 2 / 12), ("3 Mo", "3M", 0.25), ("4 Mo", "4M", 4 / 12),
                           ("6 Mo", "6M", 0.5), ("1 Yr", "1Y", 1.0)):
         if col in bills and pd.notna(bills[col]):
-            points.append({"label": label, "t": t, "rate": float(bills[col])})
+            points.append({"label": label, "t": t, "rate": round(on + float(bills[col]) - anchor, 4)})
     return {
-        "source": f"O/N: SOFR {sofr['effectiveDate']} (NY Fed). Term: Treasury bill par yields "
-                  f"{bills['Date']:%Y-%m-%d} as a proxy for term GC.",
+        "source": f"O/N: SOFR {sofr['effectiveDate']} (NY Fed). Term: SOFR plus the slope of the Treasury bill curve "
+                  f"({bills['Date']:%Y-%m-%d}) beyond 1 month, as a proxy for term GC.",
         "points": points,
     }
 
@@ -246,12 +250,12 @@ def ecb_last(key):
 
 def eur_repo():
     day, estr = ecb_last("EST/B.EU000A2X2A25.WT")
-    points = [{"label": "O/N", "t": 1 / 365, "rate": estr}]
+    points = [{"label": "S/N", "t": 1 / 365, "rate": estr}]  # no free S/N GC rate; €STR stands in
     for code, label, t in (("SR_3M", "3M", 0.25), ("SR_6M", "6M", 0.5), ("SR_9M", "9M", 0.75), ("SR_1Y", "1Y", 1.0)):
         aaa_day, rate = ecb_last(f"YC/B.U2.EUR.4F.G_N_A.SV_C_YM.{code}")
         points.append({"label": label, "t": t, "rate": round(rate, 4)})
     return {
-        "source": f"O/N: €STR {day} (ECB). Term: ECB AAA euro area government spot curve {aaa_day}, a proxy for term "
+        "source": f"S/N: €STR {day} (ECB). Term: ECB AAA euro area government spot curve {aaa_day}, a proxy for term "
                   "GC (country GC repo is not published freely). Adjust for Bund / OAT / BTP GC.",
         "points": points,
     }
