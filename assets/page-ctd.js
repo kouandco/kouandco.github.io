@@ -327,7 +327,7 @@ function start(contracts, markets) {
     recompute();
   }
   function renderContracts() {
-    contractTabs.replaceChildren(segmented(FUTURES_BY_MARKET[mcode].map((k) => ({ code: k, label: `${k} ${contracts[k].expiry.slice(2).replace("-", "/")}` })), ccode, (k) => {
+    contractTabs.replaceChildren(segmented(FUTURES_BY_MARKET[mcode].map((k) => ({ code: k, label: `${k} (${expiryLabel(contracts[k].expiry)})` })), ccode, (k) => {
       ccode = k;
       setHash({ m: mcode, c: ccode });
       editor.update(points(), background());
@@ -340,6 +340,12 @@ function start(contracts, markets) {
   renderNodes();
   editor.update(points(), background());
   recompute();
+}
+
+// "2026-12" -> "Dec 26".
+function expiryLabel(expiry) {
+  const month = new Date(`${expiry}-01T00:00:00Z`).toLocaleString("en-GB", { month: "short", timeZone: "UTC" }).slice(0, 3);
+  return `${month} ${expiry.slice(2, 4)}`;
 }
 
 // Typed yields outside −5%..30% (or not numbers) are ignored.
