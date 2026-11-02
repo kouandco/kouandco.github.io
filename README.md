@@ -1,53 +1,43 @@
 # kouandco.github.io
 
-Personal site served at [seankou.com](https://seankou.com) via GitHub Pages.
+Rates tools served at [seankou.com](https://seankou.com) by GitHub Pages: plain HTML and JavaScript
+pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 London time.
 
-The homepage (`index.html`) is rendered from [`index.qmd`](index.qmd) with [Quarto](https://quarto.org/): the BTP–Bund spread chart on the left and commentary on the right. Data is pulled from FRED when the page is rendered.
+| Page | What it shows |
+|------|---------------|
+| `homepage.html` | Menu of the tools and a snapshot of generic yields (`index.html` redirects here) |
+| `CTD.html` | Bond futures CTD model: CTD probabilities, fair futures and fair net basis from a parametric normal model; draggable generic curve with drift and vol per point; editable basket |
+| `BMNT.html` | Bond monitor: every nominal UST, Bund, OAT and BTP with realised vol, 3m carry and roll down, editable repo, futures fly hedge and hedged returns |
+| `EURX.html` | Eurex EFP gross basis and EFS invoice spreads, trade by trade |
+| `FIHG.html` | DV01 hedge calculator with futures or bonds, single or fly |
 
-## Updating the page
+## Layout
 
-Edit the "My comment" section in `index.qmd`, then re-render and push:
+- `assets/`: shared theme (`terminal.css`), page frame and table helpers (`common.js`), bond maths
+  (`bond.js`), futures model and hedge helpers (`futures.js`), the draggable curve (`curve-editor.js`)
+  and one `page-*.js` per page.
+- `data/`: everything the pages read. `markets/<UST|DE|FR|IT>.json` (bonds, curves, repo proxy, news),
+  `futures.json` (front contracts and baskets), `eurex_trades.json`, `meta.json` (refresh status).
+  `data/eurex/` archives Eurex's daily trade files (Eurex lists only ~20 days) and `data/history/`
+  the TreasuryDirect yield history (queried one date at a time). Do not delete either.
+- `scripts/`: the Python builders. `refresh.py` runs them all; each step that fails keeps its previous
+  file and is flagged in the site's status bar.
 
-```bash
-export QUARTO_PYTHON=../.venv/bin/python   # needs pandas, plotly, requests, jupyter
-quarto render index.qmd
-git add -A && git commit -m "Update BTP-Bund page" && git push
-```
+## Refreshing data
 
-Re-rendering also refreshes the chart with the latest data.
-
-## CTD Monte Carlo page
-
-`ctd.qmd` (model code in `ctd.js`) covers UST, Bund, OAT and BTP futures. Baskets, yields,
-betas and vols live in `baskets.json`, built from TreasuryDirect, the Treasury par curve,
-Eurex, Borsa Italiana, the Bundesbank and FRED. To refresh the data:
-
-```bash
-../.venv/bin/python build_baskets.py
-quarto render ctd.qmd
-git add -A && git commit -m "Refresh CTD data" && git push
-```
-
-`build_baskets.py` targets the December 2026 contracts (`UST_MONTH`, `EUREX_DELIVERY`);
-roll those constants forward at each expiry.
-
-## Eurex flow page
-
-`eurex-flow.qmd` shows EFP basis trades against the CTD and 2nd CTD, EFS invoice spreads, and monthly
-open interest, volume and positioning for DU, OE, RX, UB, OAT, BTS and IK.
-
-EFP and EFS trades: `update_eurex_trades.py` archives Eurex's daily trade files in `../eurex_data/`
-(Eurex only lists about 20 days) and rebuilds `eurex_trades.json`. The page reads that file on load,
-so after an update only a commit and push is needed, no re-render. To run it hourly, install the
-launchd job saved in `../eurex_data/com.seankou.eurex-trades.plist`.
-
-Monthly open interest:
-Eurex only keeps the latest five monthly statistics files online, so `build_eurex_flow.py` stores every
-month it reads in `eurex_flow_history.csv`; run it each month (Eurex publishes early in the following month)
-to keep extending the history:
+The `Refresh data` workflow (`.github/workflows/refresh.yml`) runs on weekdays and commits the new
+data. To run it by hand: Actions → Refresh data → Run workflow, or locally:
 
 ```bash
-../.venv/bin/python build_eurex_flow.py
-quarto render eurex-flow.qmd
-git add -A && git commit -m "Refresh Eurex flow" && git push
+pip install -r scripts/requirements.txt
+python scripts/refresh.py          # or: python scripts/markets.py DE   (one market)
 ```
+
+To preview locally, serve the folder (pages load JSON, so `file://` will not work):
+
+```bash
+python -m http.server 8000         # then open http://localhost:8000/homepage.html
+```
+
+Front futures contracts roll automatically (UST before the delivery month, Eurex two business days
+before delivery).
