@@ -125,15 +125,35 @@ export function evaluate(model, curve) {
   };
 }
 
-// Option-adjusted DV01 of the futures (price change for a 1bp parallel fall in spot yields).
-export function oaDV01(contract, market, opts, curve) {
-  const bump = (h) => {
-    const inputs = {};
-    const base = prepare(contract, market, opts);
-    for (const b of base.bonds) inputs[b.id] = { ...(opts.inputs?.[b.id] ?? {}), y: b.y + h };
-    return evaluate(prepare(contract, market, { ...opts, inputs }), curve).fair;
-  };
-  return (bump(-0.01) - bump(0.01)) / 2;
+// The basket with today's yields moved by `bp` in the generic yield: each bond by beta × bp.
+// Repo is held at the base level.
+function shifted(contract, market, opts, base, bp) {
+  const inputs = {};
+  for (const b of base.bonds) inputs[b.id] = { ...(opts.inputs?.[b.id] ?? {}), y: b.y + (b.beta * bp) / 100 };
+  return prepare(contract, market, { ...opts, inputs, repo: base.repo });
+}
+
+// Option-adjusted DV01 of the futures (price change per 100 face for a 1bp fall in the generic yield).
+export function oaDV01(contract, market, opts, curve, bp = 0) {
+  const base = prepare(contract, market, opts);
+  const fair = (h) => evaluate(shifted(contract, market, opts, base, bp + h), curve).fair;
+  return (fair(-1) - fair(1)) / 2;
+}
+
+// CTD probabilities and DV01s across shifts (bp) in today's generic yield: the option-adjusted DV01
+// against the DV01 / CF of the bond that is CTD at each level (beta-weighted, per 100 face).
+export function sweep(contract, market, opts, curve, shiftsBp) {
+  const base = prepare(contract, market, opts);
+  return shiftsBp.map((bp) => {
+    const model = shifted(contract, market, opts, base, bp);
+    const c = model.bonds[ctdIndex(model)];
+    return {
+      shift: bp,
+      prob: evaluate(model, curve).prob,
+      oaDV01: oaDV01(contract, market, opts, curve, bp),
+      ctdDV01: (c.beta * c.dv01) / c.cf,
+    };
+  });
 }
 
 // Generic-curve dynamics from the curve points: drift and vol interpolated linearly in maturity.
