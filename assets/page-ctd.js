@@ -1,7 +1,7 @@
 import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
 import { Phi, linear, parseDate, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
-import { FUTURES_BY_MARKET, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, yieldForRatio } from "./futures.js";
+import { FUTURES_BY_MARKET, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, sweep, yieldForRatio } from "./futures.js";
 
 frame("CTD");
 const app = $("#app");
@@ -56,6 +56,9 @@ function start(contracts, markets) {
   const switchesHost = el("div", { class: "note" });
   const basketHost = el("div");
   const basketNote = el("p", { class: "note" });
+  const sweepProb = el("div", { class: "plot" });
+  const sweepDV01 = el("div", { class: "plot" });
+  const sweepNote = el("p", { class: "note" });
   app.append(
     title,
     el("div", { class: "row", style: { marginBottom: "8px" } }, marketTabs, contractTabs),
@@ -70,6 +73,9 @@ function start(contracts, markets) {
         el("h2", {}, "Futures at delivery: P/CF of each deliverable"),
         payoff, switchesHost,
         el("h2", { style: { marginTop: "8px" } }, "CTD probability"), probs)),
+    el("section", { class: "panel", style: { marginTop: "10px" } },
+      el("h2", {}, "How the answer changes with today's yield level"),
+      el("div", { class: "grid cols-2" }, sweepProb, sweepDV01), sweepNote),
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("div", { class: "row", style: { justifyContent: "space-between" } },
         el("h2", {}, "Deliverable basket"),
@@ -188,10 +194,43 @@ function start(contracts, markets) {
       tile("Futures (fair)", priceText(mcode, res.fair), "E[min P/CF] at delivery"),
       tile("Market − fair", richCheap == null ? "–" : `${fmt.s(richCheap, 1)}${unit.label}`, richCheap == null ? "" : richCheap > 0 ? "futures rich" : "futures cheap"),
       tile("CTD today", ctd.name, `probability ${fmt.pct(res.prob[i0], 0)}`),
-      tile("OA DV01", fmt.n(dv * contract.face / 100, 0), `per contract (${fmt.n(dv, 4)} per 100); CTD-based ${fmt.n((ctd.dv01 / ctd.cf) * contract.face / 100, 0)}`),
+      tile("OA DV01", fmt.n(dv * contract.face / 100, 0), `per contract (${fmt.n(dv, 4)} per 100); CTD β × DV01 / CF ${fmt.n((ctd.beta * ctd.dv01 / ctd.cf) * contract.face / 100, 0)}`),
     );
     renderPayoff(model, res, fut, mkt, unit);
     renderBasket(model, res, fut, mkt, unit);
+    clearTimeout(sweepTimer);
+    sweepTimer = setTimeout(() => renderSweep(contract, market, opts, cv, model), 250);
+  }
+
+  // Probability and DV01 across shifts in today's generic yield (redrawn once editing pauses).
+  let sweepTimer = null;
+  const SHIFTS = Array.from({ length: 51 }, (_, i) => -200 + 10 * i);
+  function renderSweep(contract, market, opts, cv, model) {
+    const grid = sweep(contract, market, opts, cv, SHIFTS);
+    const per = contract.face / 100;
+    const ccy = market.currency;
+    const active = model.bonds.map((b, i) => i).filter((i) => grid.some((g) => g.prob[i] > 0.01));
+    const zero = [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#5c5c5c", dash: "dot", width: 1 } }];
+    plot(sweepProb, active.map((i, k) => ({
+      type: "scatter", mode: "lines", name: model.bonds[i].name, x: SHIFTS, y: grid.map((g) => g.prob[i] * 100),
+      line: { color: COLORS[k % COLORS.length], width: 2 }, hovertemplate: `${model.bonds[i].name}: %{y:.0f}%<extra></extra>`,
+    })), {
+      hovermode: "x unified", shapes: zero, legend: { y: -0.3 }, margin: { b: 80 },
+      xaxis: { title: { text: "Shift in today's generic yield (bp)" } },
+      yaxis: { title: { text: "CTD probability (%)" }, range: [0, 100] },
+    }, 340);
+    plot(sweepDV01, [
+      { name: "Option-adjusted", y: grid.map((g) => g.oaDV01 * per), color: "#ff9e1b" },
+      { name: "CTD β × DV01 / CF", y: grid.map((g) => g.ctdDV01 * per), color: "#5fa8ff" },
+    ].map((t) => ({ type: "scatter", mode: "lines", name: t.name, x: SHIFTS, y: t.y, line: { color: t.color, width: 2 },
+      hovertemplate: `${t.name}: ${ccy}%{y:.1f}<extra></extra>` })), {
+      hovermode: "x unified", shapes: zero, legend: { y: -0.3 }, margin: { b: 80 },
+      xaxis: { title: { text: "Shift in today's generic yield (bp)" } },
+      yaxis: { title: { text: `DV01 per contract (${ccy})` } },
+    }, 340);
+    sweepNote.textContent = "Each point re-solves the model with today's yields shifted (every deliverable moves by β × shift), " +
+      "keeping your drift, vol and curve edits. When a CTD switch is likely, the futures DV01 departs from the current CTD's " +
+      "DV01 / CF, so hedge ratios based on the CTD alone over- or under-hedge.";
   }
 
   function tile(k, v, n) {
@@ -288,7 +327,7 @@ function start(contracts, markets) {
     recompute();
   }
   function renderContracts() {
-    contractTabs.replaceChildren(segmented(FUTURES_BY_MARKET[mcode].map((k) => ({ code: k, label: `${k} ${contracts[k].expiry.slice(2).replace("-", "/")}` })), ccode, (k) => {
+    contractTabs.replaceChildren(segmented(FUTURES_BY_MARKET[mcode].map((k) => ({ code: k, label: `${k} (${expiryLabel(contracts[k].expiry)})` })), ccode, (k) => {
       ccode = k;
       setHash({ m: mcode, c: ccode });
       editor.update(points(), background());
@@ -301,6 +340,12 @@ function start(contracts, markets) {
   renderNodes();
   editor.update(points(), background());
   recompute();
+}
+
+// "2026-12" -> "Dec 26".
+function expiryLabel(expiry) {
+  const month = new Date(`${expiry}-01T00:00:00Z`).toLocaleString("en-GB", { month: "short", timeZone: "UTC" }).slice(0, 3);
+  return `${month} ${expiry.slice(2, 4)}`;
 }
 
 // Typed yields outside −5%..30% (or not numbers) are ignored.
