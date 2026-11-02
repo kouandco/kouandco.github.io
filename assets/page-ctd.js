@@ -1,5 +1,5 @@
 import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
-import { Phi, linear, parseDate, yearsBetween } from "./bond.js";
+import { Phi, linear, parseDate, phi, pricer, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
 import { FUTURES_BY_MARKET, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, sweep, yieldForRatio } from "./futures.js";
 
@@ -32,7 +32,29 @@ function start(contracts, markets) {
   const nodes = {};            // market -> generic curve points {t, base, y, drift, vol}
   const inputs = {};           // contract -> bond id -> {y (before curve shift), beta, cf}
   const repo = {};             // contract -> repo override (%)
+  const added = {};            // contract -> bonds added to the basket {id, name, coupon, maturity, cf, yield?, beta?, custom}
   for (const m of codes) nodes[m] = freshNodes(markets[m]);
+
+  // The selected contract and its market with the user's added bonds included.
+  function current() {
+    const market = markets[mcode];
+    const contract = contracts[ccode];
+    const extra = added[ccode] ?? [];
+    return {
+      contract: { ...contract, basket: [...contract.basket, ...extra.map(({ id, name, coupon, maturity, cf }) => ({ id, name, coupon, maturity, cf }))] },
+      market: { ...market, bonds: [...market.bonds, ...extra.filter((b) => b.custom)] },
+    };
+  }
+
+  // Conversion factor of a bond added by hand: CME formula for Treasuries, otherwise Eurex's price per 1 nominal
+  // at the notional coupon (4% for the Buxl, 6% otherwise) on the delivery date.
+  function conversionFactor(coupon, maturity) {
+    const contract = contracts[ccode];
+    const first = parseDate(contract.firstDelivery);
+    if (mcode === "UST") return cmeConversionFactor(coupon, parseDate(maturity), first, ["TU", "FV"].includes(ccode) ? 1 : 3);
+    const notional = ccode === "UB" ? 4 : 6;
+    return Math.round(pricer(coupon, parseDate(maturity), parseDate(contract.delivery), markets[mcode].freq).price(notional) * 1e4) / 1e6;
+  }
 
   function defaultContract(m) {
     return { UST: "TY", DE: "RX", FR: "OAT", IT: "IK" }[m];
@@ -43,7 +65,7 @@ function start(contracts, markets) {
 
   // ---- static layout
   const title = el("div", { class: "page-title" },
-    el("h1", {}, "Bond Futures CTD Monte Carlo"),
+    el("h1", {}, "Bond Futures CTD"),
     el("span", { class: "muted" }, "parametric: CTD regions and fair value from the normal distribution, no simulation"));
   const marketTabs = el("div");
   const contractTabs = el("div");
@@ -56,6 +78,7 @@ function start(contracts, markets) {
   const switchesHost = el("div", { class: "note" });
   const basketHost = el("div");
   const basketNote = el("p", { class: "note" });
+  const addHost = el("div", { class: "stack", style: { marginTop: "8px" } });
   const sweepProb = el("div", { class: "plot" });
   const sweepDV01 = el("div", { class: "plot" });
   const sweepNote = el("p", { class: "note" });
@@ -70,7 +93,7 @@ function start(contracts, markets) {
           el("button", { class: "btn", onclick: () => { nodes[mcode] = freshNodes(markets[mcode]); refreshCurve(); } }, "Reset curve")),
         editorHost, nodesHost, spreadsHost),
       el("section", { class: "panel" },
-        el("h2", {}, "Futures at delivery: P/CF of each deliverable"),
+        el("h2", {}, "Distribution of the CTD yield at delivery, coloured by CTD"),
         payoff, switchesHost,
         el("h2", { style: { marginTop: "8px" } }, "CTD probability"), probs)),
     el("section", { class: "panel", style: { marginTop: "10px" } },
@@ -79,8 +102,8 @@ function start(contracts, markets) {
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("div", { class: "row", style: { justifyContent: "space-between" } },
         el("h2", {}, "Deliverable basket"),
-        el("button", { class: "btn", onclick: () => { inputs[ccode] = {}; recompute(); } }, "Reset bonds")),
-      basketHost, basketNote),
+        el("button", { class: "btn", onclick: () => { inputs[ccode] = {}; added[ccode] = []; renderAddForm(); recompute(); } }, "Reset bonds")),
+      basketHost, addHost, basketNote),
     methodNote());
 
   const editor = curveEditor({
@@ -131,8 +154,7 @@ function start(contracts, markets) {
   };
   const curve = () => curveDynamics(nodes[mcode]);
   function options() {
-    const market = markets[mcode];
-    const contract = contracts[ccode];
+    const { market, contract } = current();
     const settle = parseDate(market.settle);
     const shift = shiftAt();
     const byId = new Map(market.bonds.map((b) => [b.id, b]));
@@ -151,8 +173,8 @@ function start(contracts, markets) {
   }
 
   const background = () => {
-    const market = markets[mcode];
-    const ids = new Set(contracts[ccode].basket.map((d) => d.id));
+    const { market, contract } = current();
+    const ids = new Set(contract.basket.map((d) => d.id));
     const settle = parseDate(market.settle);
     return market.bonds.map((b) => ({
       x: yearsBetween(settle, parseDate(b.maturity)), y: b.yield, name: `${b.name}  ${b.yield.toFixed(3)}%`,
@@ -163,8 +185,7 @@ function start(contracts, markets) {
   // ---- recompute and render outputs
   let last = null;
   function recompute() {
-    const market = markets[mcode];
-    const contract = contracts[ccode];
+    const { market, contract } = current();
     const unit = basisUnit(mcode);
     const opts = options();
     const model = prepare(contract, market, opts);
@@ -196,7 +217,7 @@ function start(contracts, markets) {
       tile("CTD today", ctd.name, `probability ${fmt.pct(res.prob[i0], 0)}`),
       tile("OA DV01", fmt.n(dv * contract.face / 100, 0), `per contract (${fmt.n(dv, 4)} per 100); CTD β × DV01 / CF ${fmt.n((ctd.beta * ctd.dv01 / ctd.cf) * contract.face / 100, 0)}`),
     );
-    renderPayoff(model, res, fut, mkt, unit);
+    renderPayoff(model, res);
     renderBasket(model, res, fut, mkt, unit);
     clearTimeout(sweepTimer);
     sweepTimer = setTimeout(() => renderSweep(contract, market, opts, cv, model), 250);
@@ -211,9 +232,13 @@ function start(contracts, markets) {
     const ccy = market.currency;
     const active = model.bonds.map((b, i) => i).filter((i) => grid.some((g) => g.prob[i] > 0.01));
     const zero = [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#5c5c5c", dash: "dot", width: 1 } }];
-    plot(sweepProb, active.map((i, k) => ({
+    // Same colour per bond as the distribution chart; bonds that only become CTD after a shift take the unused colours.
+    const spare = COLORS.filter((c) => ![...colours.values()].includes(c));
+    let next = 0;
+    const colourFor = (id) => colours.get(id) ?? spare[next++ % Math.max(spare.length, 1)] ?? "#94a3b8";
+    plot(sweepProb, active.map((i) => ({
       type: "scatter", mode: "lines", name: model.bonds[i].name, x: SHIFTS, y: grid.map((g) => g.prob[i] * 100),
-      line: { color: COLORS[k % COLORS.length], width: 2 }, hovertemplate: `${model.bonds[i].name}: %{y:.0f}%<extra></extra>`,
+      line: { color: colourFor(model.bonds[i].id), width: 2 }, hovertemplate: `${model.bonds[i].name}: %{y:.0f}%<extra></extra>`,
     })), {
       hovermode: "x unified", shapes: zero, legend: { y: -0.3 }, margin: { b: 80 },
       xaxis: { title: { text: "Shift in today's generic yield (bp)" } },
@@ -237,51 +262,62 @@ function start(contracts, markets) {
     return el("div", { class: "tile" }, el("div", { class: "k" }, k), el("div", { class: "v" }, v), el("div", { class: "n" }, n));
   }
 
-  function renderPayoff(model, res, fut, mkt, unit) {
+  let colours = new Map();     // bond id -> chart colour, shared by the distribution, probability and sweep charts
+  // Normal distribution of the CTD's yield at delivery; each region is filled with the colour of the bond
+  // that is cheapest to deliver there. The probability bars use the same colours.
+  function renderPayoff(model, res) {
     const { bonds } = model;
     const c = ctdIndex(model);
+    const sdBp = res.sd[c] * 100;
     const xOf = (z) => (res.mu[c] + res.sd[c] * z) * 100;
-    const idx = res.zs.map((_, k) => k).filter((k) => k % 4 === 0 && Math.abs(res.zs[k]) <= 3.5);
-    const xs = idx.map((k) => xOf(res.zs[k]));
-    const order = bonds.map((_, i) => i).sort((a, b) => res.prob[b] - res.prob[a]).slice(0, 8);
-    const traces = order.map((i, n) => ({
-      type: "scatter", mode: "lines", name: bonds[i].name, x: xs, y: idx.map((k) => res.ratio(i, res.zs[k])),
-      line: { color: COLORS[n % COLORS.length], width: 1.2, dash: res.prob[i] < 0.005 ? "dot" : "solid" },
-      hovertemplate: `${bonds[i].name}<br>CTD yield %{x:+.0f}bp: P/CF %{y:.3f}<extra></extra>`,
-    }));
-    traces.push({
-      type: "scatter", mode: "lines", name: "Futures (cheapest)", x: xs, y: idx.map((k) => res.env[k]),
-      line: { color: "#ffffff", width: 3 }, hovertemplate: "Futures %{y:.3f}<extra></extra>",
+    const colourOf = new Map();
+    bonds.map((_, i) => i).filter((i) => res.prob[i] >= 0.0005).sort((a, b) => res.prob[b] - res.prob[a])
+      .forEach((i, k) => colourOf.set(i, COLORS[k % COLORS.length]));
+    colours = new Map([...colourOf].map(([i, c]) => [bonds[i].id, c]));
+    const Z = 3.5;
+    const cuts = res.switches.filter((s) => Math.abs(s.z) < Z);
+    const bounds = [-Z, ...cuts.map((s) => s.z), Z];
+    const startOwner = res.switches.filter((s) => s.z <= -Z).reduce((_, s) => s.to, res.ctd[0]);
+    const shown = new Set();
+    const traces = bounds.slice(0, -1).map((a, k) => {
+      const b = bounds[k + 1];
+      const owner = k === 0 ? startOwner : cuts[k - 1].to;
+      const zs = Array.from({ length: 41 }, (_, j) => a + ((b - a) * j) / 40);
+      const colour = colourOf.get(owner) ?? "#5c5c5c";
+      const first = !shown.has(owner);
+      shown.add(owner);
+      return {
+        type: "scatter", mode: "lines", x: zs.map(xOf), y: zs.map((z) => phi(z) / sdBp), fill: "tozeroy",
+        name: `${bonds[owner].name} ${fmt.pct(res.prob[owner], 1)}`, legendgroup: String(owner), showlegend: first,
+        line: { color: colour, width: 1.5 }, fillcolor: hexAlpha(colour, 0.35),
+        hovertemplate: `CTD ${bonds[owner].name}<br>CTD yield %{x:+.0f}bp<extra></extra>`,
+      };
     });
-    traces.push({
-      type: "scatter", mode: "lines", name: "Probability density", x: xs, y: idx.map((k) => Math.exp(-0.5 * res.zs[k] ** 2)),
-      yaxis: "y2", fill: "tozeroy", line: { color: "rgba(255,158,27,0.5)", width: 1 }, fillcolor: "rgba(255,158,27,0.08)", hoverinfo: "skip",
-    });
-    const shapes = res.switches.filter((s) => Math.abs(s.z) <= 3.5).map((s) => ({
-      type: "line", x0: xOf(s.z), x1: xOf(s.z), yref: "paper", y0: 0, y1: 1, line: { color: "#ffd24d", dash: "dot", width: 1 },
-    }));
-    if (mkt) shapes.push({ type: "line", xref: "paper", x0: 0, x1: 1, y0: mkt.price, y1: mkt.price, line: { color: "#5fa8ff", dash: "dash", width: 1 } });
     plot(payoff, traces, {
       xaxis: { title: { text: `Change in CTD (${bonds[c].name}) yield to delivery, bp` }, zeroline: true },
-      yaxis: { title: { text: "Price / CF at delivery" } },
-      yaxis2: { overlaying: "y", side: "right", range: [0, 4], visible: false },
-      shapes, legend: { y: -0.3 }, margin: { b: 90 },
-    }, 400);
+      yaxis: { title: { text: "Probability density (per bp)" }, rangemode: "tozero" },
+      shapes: cuts.map((s) => ({ type: "line", x0: xOf(s.z), x1: xOf(s.z), yref: "paper", y0: 0, y1: 1,
+        line: { color: "#ffd24d", dash: "dot", width: 1 } })),
+      legend: { y: -0.3 }, margin: { b: 90 },
+    }, 380);
     const near = res.switches.filter((s) => Math.abs(s.z) <= 3);
     switchesHost.replaceChildren(...near.map((s) => el("div", {},
       `CTD switches ${bonds[s.from].name} → ${bonds[s.to].name} at ${fmt.s(xOf(s.z), 0)}bp in the CTD yield (z = ${fmt.s(s.z, 2)}, `,
       `${fmt.pct(s.z > 0 ? 1 - Phi(s.z) : Phi(s.z), 1)} chance of moving beyond it).`)),
       near.length ? "" : el("div", {}, "No CTD switch within ±3 standard deviations of the CTD yield at delivery."),
-      mkt ? el("div", {}, `Blue dashed line: market futures ${priceText(mcode, mkt.price)}.`) : "");
-    const ranked = bonds.map((b, i) => ({ b, p: res.prob[i] })).filter((x) => x.p >= 0.0005).sort((a, b) => a.p - b.p);
+      el("div", {}, `Mean ${fmt.s(xOf(0), 0)}bp (drift), standard deviation ${sdBp.toFixed(0)}bp to delivery.`));
+    const ranked = bonds.map((b, i) => ({ b, i, p: res.prob[i] })).filter((x) => x.p >= 0.0005).sort((a, b) => a.p - b.p);
     plot(probs, [{ type: "bar", orientation: "h", x: ranked.map((r) => 100 * r.p), y: ranked.map((r) => r.b.name),
-      marker: { color: "#ff9e1b" }, text: ranked.map((r) => `${(100 * r.p).toFixed(1)}%`), textposition: "outside",
+      marker: { color: ranked.map((r) => colourOf.get(r.i)) }, text: ranked.map((r) => `${(100 * r.p).toFixed(1)}%`), textposition: "outside",
       cliponaxis: false, hovertemplate: "%{y}: %{x:.1f}%<extra></extra>" }],
     { xaxis: { title: { text: "%" }, range: [0, 115] }, margin: { l: 140 }, showlegend: false }, Math.max(140, 34 * ranked.length + 60));
   }
 
   const basketTable = dataTable([
-    { key: "name", label: "Bond", fmt: (r) => `${r.isCtd ? "◆ " : ""}${r.name}`, value: (r) => r.t, left: true },
+    { key: "rm", label: "", value: (r) => (r.added ? 1 : 0), fmt: (r) => (r.added
+      ? el("button", { class: "btn", title: "Remove from basket", "aria-label": `Remove ${r.name}`, onclick: (e) => { e.stopPropagation(); removeBond(r.id); } }, "✕")
+      : ""), left: true },
+    { key: "name", label: "Bond", fmt: (r) => `${r.isCtd ? "◆ " : ""}${r.name}${r.added ? " (added)" : ""}`, value: (r) => r.t, left: true },
     { key: "mat", label: "Maturity", fmt: (r) => r.maturity, value: (r) => r.t },
     { key: "y", label: "Yield", unit: "%", edit: { get: (r) => r.y.toFixed(4), set: (r, v) => setInput(r.id, { y: clampYield(v, r.y) - r.shift }), changed: (r) => inputs[ccode]?.[r.id]?.y != null } },
     { key: "beta", label: "Beta", edit: { get: (r) => r.beta.toFixed(2), set: (r, v) => setInput(r.id, { beta: +v }), changed: (r) => inputs[ccode]?.[r.id]?.beta != null } },
@@ -305,8 +341,9 @@ function start(contracts, markets) {
     const shift = shiftAt();
     const c = ctdIndex(model);
     basketTable.node.classList.toggle("tall", model.bonds.length > 15);
+    const extra = new Set((added[ccode] ?? []).map((a) => a.id));
     basketTable.update(model.bonds.map((b, i) => ({
-      ...b, isCtd: i === c, prob: res.prob[i], shift: shift(b.t),
+      ...b, isCtd: i === c, prob: res.prob[i], shift: shift(b.t), added: extra.has(b.id),
       gross: (b.clean - fut * b.cf) * unit.mult, carryT: b.carry * unit.mult,
       nbFair: res.nbFair[i] * unit.mult, nbMkt: mkt ? (b.fwdClean - mkt.price * b.cf) * unit.mult : null,
     })));
@@ -316,6 +353,56 @@ function start(contracts, markets) {
       `◆ = CTD at forward prices. Edited inputs are highlighted; P/CF edits solve for the yield.`;
   }
 
+  // ---- adding bonds to the basket
+  function addBond(bond) {
+    (added[ccode] ??= []).push(bond);
+    renderAddForm();
+    editor.update(points(), background());
+    recompute();
+  }
+  function removeBond(id) {
+    added[ccode] = (added[ccode] ?? []).filter((b) => b.id !== id);
+    if (inputs[ccode]) delete inputs[ccode][id];
+    renderAddForm();
+    editor.update(points(), background());
+    recompute();
+  }
+  function renderAddForm() {
+    const market = markets[mcode];
+    const contract = contracts[ccode];
+    const inBasket = new Set([...contract.basket, ...(added[ccode] ?? [])].map((b) => b.id));
+    const pick = el("select", { "aria-label": "Bond to add" },
+      el("option", { value: "" }, "choose a bond…"),
+      market.bonds.filter((b) => !inBasket.has(b.id) && b.maturity > contract.delivery).sort((a, b) => a.maturity.localeCompare(b.maturity))
+        .map((b) => el("option", { value: b.id }, `${b.name}  ${b.yield.toFixed(3)}%`)));
+    const addPick = el("button", { class: "btn", onclick: () => {
+      const b = market.bonds.find((x) => x.id === pick.value);
+      if (b) addBond({ id: b.id, name: b.name, coupon: b.coupon, maturity: b.maturity, cf: conversionFactor(b.coupon, b.maturity), custom: false });
+    } }, "Add");
+    const f = {
+      name: el("input", { type: "text", placeholder: "name", style: { width: "11em" }, "aria-label": "New bond name" }),
+      coupon: el("input", { type: "number", step: "0.125", placeholder: "coupon %", "aria-label": "Coupon %" }),
+      maturity: el("input", { type: "date", "aria-label": "Maturity" }),
+      yield: el("input", { type: "number", step: "0.001", placeholder: "yield %", "aria-label": "Yield %" }),
+      beta: el("input", { type: "number", step: "0.01", value: "1", "aria-label": "Beta" }),
+      cf: el("input", { type: "number", step: "0.0001", placeholder: "auto", "aria-label": "Conversion factor (blank = computed)" }),
+    };
+    const status = el("span", { class: "muted" });
+    const addCustom = el("button", { class: "btn", onclick: () => {
+      const coupon = parseFloat(f.coupon.value), y = parseFloat(f.yield.value), maturity = f.maturity.value;
+      if (!isFinite(coupon) || !isFinite(y) || !maturity) { status.textContent = "Coupon, maturity and yield are required."; return; }
+      if (maturity <= contract.delivery) { status.textContent = `Maturity must be after delivery (${contract.delivery}).`; return; }
+      const n = (added[ccode] ?? []).filter((b) => b.custom).length + 1;
+      const cf = parseFloat(f.cf.value);
+      addBond({ id: `CUSTOM-${ccode}-${n}`, name: f.name.value.trim() || `Custom ${coupon} ${maturity}`, coupon, maturity,
+        cf: isFinite(cf) && cf > 0 ? cf : conversionFactor(coupon, maturity), yield: clampYield(y, 4), beta: parseFloat(f.beta.value) || 1, custom: true });
+    } }, "Add");
+    addHost.replaceChildren(
+      el("div", { class: "row" }, el("span", { class: "amber" }, "Add a bond from the market:"), pick, addPick),
+      el("div", { class: "row" }, el("span", { class: "amber" }, "Or a new bond (e.g. a future issue):"),
+        f.name, f.coupon, el("label", {}, "maturity ", f.maturity), f.yield, el("label", {}, "β ", f.beta), el("label", {}, "CF ", f.cf), addCustom, status));
+  }
+
   // ---- selection
   function selectMarket(m) {
     mcode = m;
@@ -323,6 +410,7 @@ function start(contracts, markets) {
     setHash({ m: mcode, c: ccode });
     renderContracts();
     renderNodes();
+    renderAddForm();
     editor.update(points(), background());
     recompute();
   }
@@ -330,6 +418,7 @@ function start(contracts, markets) {
     contractTabs.replaceChildren(segmented(FUTURES_BY_MARKET[mcode].map((k) => ({ code: k, label: `${k} (${expiryLabel(contracts[k].expiry)})` })), ccode, (k) => {
       ccode = k;
       setHash({ m: mcode, c: ccode });
+      renderAddForm();
       editor.update(points(), background());
       recompute();
     }));
@@ -338,8 +427,28 @@ function start(contracts, markets) {
   setHash({ m: mcode, c: ccode });
   renderContracts();
   renderNodes();
+  renderAddForm();
   editor.update(points(), background());
   recompute();
+}
+
+function hexAlpha(hex, a) {
+  return `rgba(${parseInt(hex.slice(1, 3), 16)},${parseInt(hex.slice(3, 5), 16)},${parseInt(hex.slice(5, 7), 16)},${a})`;
+}
+
+// CME conversion factor (6% notional coupon), term from the first delivery day rounded down to whole
+// months (TU, FV) or quarters (other contracts).
+function cmeConversionFactor(coupon, maturity, first, roundMonths) {
+  let months = (maturity.getUTCFullYear() - first.getUTCFullYear()) * 12 + maturity.getUTCMonth() - first.getUTCMonth();
+  if (maturity.getUTCDate() < first.getUTCDate()) months -= 1;
+  months -= months % roundMonths;
+  const n = Math.floor(months / 12), z = months % 12;
+  const v = z < 7 ? z : roundMonths === 3 ? 3 : z - 6;
+  const c = coupon / 100;
+  const a = 1 / 1.03 ** (v / 6);
+  const b = (c / 2) * (6 - v) / 6;
+  const cc = z < 7 ? 1 / 1.03 ** (2 * n) : 1 / 1.03 ** (2 * n + 1);
+  return Math.round((a * (c / 2 + cc + (c / 0.06) * (1 - cc)) - b) * 1e4) / 1e4;
 }
 
 // "2026-12" -> "Dec 26".
@@ -358,7 +467,8 @@ function methodNote() {
   return el("details", { class: "method panel" }, el("summary", {}, "Method and data"),
     el("ul", { class: "small" },
       el("li", {}, "Each deliverable's yield at delivery is its forward yield + drift × T + beta × vol × √T × z, with one standard normal z for all bonds (a single-factor, parallel-plus-beta curve model). Drift and vol are read off the generic curve points at the bond's maturity."),
-      el("li", {}, "The futures delivers the lowest price / conversion factor. The points on the z line where the cheapest bond changes are solved exactly, so CTD probabilities are differences of normal CDFs; the fair futures price is the expected lower envelope (Simpson's rule over ±5 standard deviations). Nothing is simulated, despite the page's name."),
+      el("li", {}, "The futures delivers the lowest price / conversion factor. The points on the z line where the cheapest bond changes are solved exactly, so CTD probabilities are differences of normal CDFs; the fair futures price is the expected lower envelope (Simpson's rule over ±5 standard deviations). Nothing is simulated."),
+      el("li", {}, "Bonds can be added to the basket, from the market or by hand (e.g. a new issue). Their conversion factor is computed with the CME formula (UST) or as Eurex does (price per 1 nominal at the 6% notional coupon, 4% for the Buxl, on the delivery date) unless typed in. Check eligibility against the exchange's rules."),
       el("li", {}, "Moving a curve point shifts today's yields of the deliverables by the interpolated change at their maturity; the forward yields then follow from repo. Drift is your expected yield change per year to delivery; vol is the normal (bp) volatility per year, defaulting to the realised 3-month volatility of that curve point."),
       el("li", {}, "Bond yields: TreasuryDirect (UST), Bundesbank (Bunds), Borsa Italiana closing prices (OATs, BTPs). Conversion factors: CME formula (UST), Eurex notified factors. Market futures prices: daily VWAP of the futures leg of Eurex EFP trades on the date of the bond prices; none for UST (CME data cannot be republished), so the UST tiles show the model only."),
       el("li", {}, "Beta: regression of each bond's daily yield change on the fitted curve's change at its maturity over 3 months (clipped to 0.5–1.5).")));

@@ -22,14 +22,16 @@ export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "
   tip.textContent = "Drag a point up or down (or focus it and use ↑ ↓) to change it.";
   wrap.append(tip);
 
-  let points = [], background = [], range = null, selected = -1, dragging = -1;
+  // overlay: {lines: [{x, label}], marks: [{x, y, label}], segments: [{x0, x1, y}]}, drawn but not draggable.
+  let points = [], background = [], overlay = {}, range = null, selected = -1, dragging = -1;
   const sx = (x) => m.l + ((x - range.x0) / (range.x1 - range.x0)) * (width - m.l - m.r);
   const sy = (y) => m.t + ((range.y1 - y) / (range.y1 - range.y0)) * (height - m.t - m.b);
   const iy = (py) => range.y1 - ((py - m.t) / (height - m.t - m.b)) * (range.y1 - range.y0);
 
   function fitRange() {
-    const xs = [...points, ...background].map((p) => p.x);
-    const ys = [...points, ...background].map((p) => p.y);
+    const all = [...points, ...background, ...(overlay.marks ?? []), ...(overlay.segments ?? []).map((s) => ({ x: s.x1, y: s.y }))];
+    const xs = all.map((p) => p.x);
+    const ys = all.map((p) => p.y);
     const pad = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.25, 0.1);
     range = { x0: 0, x1: Math.max(...xs) * 1.04, y0: Math.min(...ys) - pad, y1: Math.max(...ys) + pad };
   }
@@ -46,11 +48,27 @@ export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "
       t.textContent = y.toFixed(yStep < 0.1 ? 2 : 1);
       g.append(t);
     }
-    for (const x of xTicks ?? defaultTicks(range.x1)) {
+    for (const tick of xTicks ?? defaultTicks(range.x1)) {
+      const { x, label } = typeof tick === "number" ? { x: tick, label: `${tick}` } : tick;
       const t = svg("text", { x: sx(x), y: height - m.b + 16, "text-anchor": "middle" });
-      t.textContent = typeof x === "number" ? `${x}` : x;
+      t.textContent = label;
       g.append(t);
       g.append(svg("line", { x1: sx(x), x2: sx(x), y1: height - m.b, y2: height - m.b + 4, stroke: "#3a3a3a" }));
+    }
+    (overlay.lines ?? []).forEach((l, i) => {
+      g.append(svg("line", { x1: sx(l.x), x2: sx(l.x), y1: m.t, y2: height - m.b, stroke: "#5fa8ff", "stroke-dasharray": "4 3" }));
+      const t = svg("text", { x: sx(l.x) + 4, y: m.t + 10 + 13 * i, fill: "#5fa8ff" });
+      t.textContent = l.label;
+      g.append(t);
+    });
+    for (const s of overlay.segments ?? []) {
+      g.append(svg("line", { x1: sx(s.x0), x2: sx(s.x1), y1: sy(s.y), y2: sy(s.y), stroke: "#ff5c5c", "stroke-width": 3 }));
+    }
+    for (const p of overlay.marks ?? []) {
+      g.append(svg("circle", { cx: sx(p.x), cy: sy(p.y), r: 4, fill: "#5fa8ff" }));
+      const t = svg("text", { x: sx(p.x) + 6, y: sy(p.y) + 14, fill: "#5fa8ff" });
+      t.textContent = p.label;
+      g.append(t);
     }
     g.append(svg("line", { x1: m.l, x2: width - m.r, y1: height - m.b, y2: height - m.b, stroke: "#3a3a3a" }));
     const xt = svg("text", { x: (m.l + width - m.r) / 2, y: height - 4, "text-anchor": "middle", fill: "#ff9e1b" });
@@ -132,9 +150,10 @@ export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "
 
   return {
     node: wrap,
-    update(next, bg = background, { keepRange = false } = {}) {
+    update(next, bg = background, { keepRange = false, extra = {} } = {}) {
       points = next.map((p) => ({ ...p }));
       background = bg;
+      overlay = extra;
       if (!keepRange || !range) fitRange();
       draw();
     },

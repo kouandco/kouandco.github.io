@@ -9,6 +9,7 @@ import traceback
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import auctions
 import eurex_trades
 import futures
 import markets
@@ -18,6 +19,7 @@ STEPS = [
     ("Eurex trades", eurex_trades.build),
     *[(f"Market {code}", lambda code=code: markets.build(code)) for code in markets.SOURCES],
     ("Futures baskets", futures.build),
+    ("Auctions", auctions.build),
 ]
 
 

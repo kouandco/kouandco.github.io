@@ -3,3 +3,4 @@ pandas
 requests
 openpyxl
 lxml
+pypdf

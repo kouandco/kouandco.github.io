@@ -7,27 +7,32 @@ frame("BMNT");
 const app = $("#app");
 const HORIZON = 0.25; // years
 const HAIRCUT = { UST: 2, DE: 2, FR: 3, IT: 5 };
+// Contract whose delivery sets the boxing window on the repo curve.
+const MAIN = { UST: "TY", DE: "RX", FR: "OAT", IT: "IK" };
+const REPO_TICKS = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ x: m / 12, label: m ? `${m}M` : "0" }));
 
 try {
-  const [futures, ...list] = await Promise.all([loadJSON("data/futures.json"), ...MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))]);
-  start(futures.contracts, Object.fromEntries(MARKETS.map((m, i) => [m.code, list[i]])));
+  const [futures, auctions, ...list] = await Promise.all([loadJSON("data/futures.json"), loadJSON("data/auctions.json").catch(() => null),
+    ...MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))]);
+  start(futures.contracts, auctions, Object.fromEntries(MARKETS.map((m, i) => [m.code, list[i]])));
 } catch (err) {
   showError(app, err);
 }
 
-function start(contracts, markets) {
+function start(contracts, auctions, markets) {
   const codes = MARKETS.map((m) => m.code);
   let mcode = hashParam("m", "DE", codes);
-  const state = {};  // market -> {repo points, haircut, overrides: id -> {gc, special}, group, search}
+  const state = {};  // market -> {repo points, boxing premium, haircut, overrides: id -> {gc, special}, filters}
   const stateFor = (m) => (state[m] ??= {
-    repo: markets[m].repo.points.map((p) => ({ ...p })), haircut: HAIRCUT[m], overrides: {}, group: "All", search: "", short: false,
+    repo: markets[m].repo.points.map((p) => ({ ...p })), premium: 0, haircut: HAIRCUT[m], overrides: {}, group: "All", search: "", short: false,
   });
 
   const marketTabs = el("div");
-  const newsHost = el("div");
   const chart = el("div", { class: "plot" });
   const repoHost = el("div");
+  const boxHost = el("div", { class: "row small", style: { marginTop: "6px" } });
   const repoNote = el("p", { class: "note" });
+  const auctionHost = el("div");
   const hedgeHost = el("div");
   const controls = el("div", { class: "row" });
   const tableHost = el("div");
@@ -35,39 +40,94 @@ function start(contracts, markets) {
   app.append(
     el("div", { class: "page-title" }, el("h1", {}, "Bond Monitor"), el("span", { class: "muted" }, "nominal government bonds: carry, roll down, repo and futures-hedged returns over 3 months")),
     el("div", { style: { marginBottom: "8px" } }, marketTabs),
-    newsHost,
-    el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
+    el("div", { class: "grid cols-2" },
       el("section", { class: "panel" }, el("h2", {}, "Yields and fitted curve by issue type"), chart),
       el("section", { class: "panel" },
-        el("div", { class: "row", style: { justifyContent: "space-between" } }, el("h2", {}, "Repo curve (GC)"),
-          el("button", { class: "btn", onclick: () => { stateFor(mcode).repo = markets[mcode].repo.points.map((p) => ({ ...p })); renderRepo(); recompute(); } }, "Reset")),
-        repoHost, repoNote)),
+        el("div", { class: "row", style: { justifyContent: "space-between" } }, el("h2", {}, "Repo curve (GC) to 6 months"),
+          el("button", { class: "btn", onclick: () => {
+            const st = stateFor(mcode);
+            st.repo = markets[mcode].repo.points.map((p) => ({ ...p }));
+            st.premium = 0;
+            recompute();
+          } }, "Reset")),
+        repoHost, boxHost, repoNote)),
+    el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Auctions and syndications: recent and upcoming"), auctionHost),
     el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge futures (front contracts)"), hedgeHost),
     el("section", { class: "panel", style: { marginTop: "10px" } }, controls, tableHost, tableNote),
     methodNote());
 
+  // ---- repo curve, boxing window and premium
+  const shownRepo = () => stateFor(mcode).repo.filter((p) => p.t <= 0.5 + 1e-9);
   const repoEditor = curveEditor({
-    width: 720, height: 260, xTitle: "Term", yTitle: "Rate (%)", yDigits: 3, step: 0.005,
-    xTicks: [0, 0.25, 0.5, 0.75, 1],
-    onChange: (pts, i) => { stateFor(mcode).repo[i].rate = pts[i].y; recompute(); },
+    width: 720, height: 260, xTitle: "Term", yTitle: "Rate (%)", yDigits: 3, step: 0.005, xTicks: REPO_TICKS,
+    onChange: (pts, i) => { shownRepo()[i].rate = pts[i].y; recompute({ dragging: true }); },
   });
   repoHost.append(repoEditor.node);
-  function renderRepo() {
-    repoEditor.update(stateFor(mcode).repo.map((p) => ({ x: p.t, y: p.rate, label: p.label })), []);
-    repoNote.textContent = markets[mcode].repo.source + " Drag points to change the GC curve; the 3M point sets the GC rate column (each row can be overwritten).";
+
+  // Boxing date = 5 business days before the main contract's delivery. The premium (bp) is how far below GC the
+  // CTD's repo trades from boxing to delivery (positive = special); term repo to delivery is rebuilt from it.
+  function boxing() {
+    const market = markets[mcode];
+    const st = stateFor(mcode);
+    const contract = contracts[MAIN[mcode]];
+    const settle = parseDate(market.settle);
+    const delivery = parseDate(contract.delivery);
+    let box = delivery;
+    for (let n = 0; n < 5;) {
+      box = new Date(box - 864e5);
+      if (box.getUTCDay() % 6) n++;
+    }
+    const tD = yearsBetween(settle, delivery);
+    const tB = Math.min(Math.max(yearsBetween(settle, box), 1 / 365), tD - 1 / 365);
+    const rB = repoAt(st.repo, tB);
+    const gcD = repoAt(st.repo, tD);
+    const fwdGC = (gcD * tD - rB * tB) / (tD - tB);
+    const fwd = fwdGC - st.premium / 100;
+    return { code: MAIN[mcode], box, delivery, tB, tD, rB, gcD, fwdGC, fwd, rD: (rB * tB + fwd * (tD - tB)) / tD };
   }
 
-  // ---- news banner
-  function renderNews() {
-    const items = markets[mcode].news ?? [];
-    if (!items.length) { newsHost.replaceChildren(el("div", { class: "news" }, el("span", { class: "lead" }, "NEWS"), el("span", { class: "top muted" }, "No recent headlines."))); return; }
-    const [first, ...rest] = items;
-    const link = (n) => el("a", { href: n.link, target: "_blank", rel: "noopener" }, n.title);
-    const track = el("div", { class: "track" }, ...[...rest, ...rest].map((n) => el("span", {}, link(n), el("span", { class: "src" }, `${n.source} ${n.date.slice(5)}`), "  ")));
-    newsHost.replaceChildren(
-      el("div", { class: "news" }, el("span", { class: "lead" }, "TOP NEWS"),
-        el("span", { class: "top" }, link(first), el("span", { class: "src" }, `${first.source} · ${first.date} UTC`))),
-      rest.length ? el("div", { class: "ticker", "aria-label": "More headlines" }, track) : "");
+  function renderRepo(bx, dragging = false) {
+    const st = stateFor(mcode);
+    const day = (d) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+    repoEditor.update(shownRepo().map((p) => ({ x: p.t, y: p.rate, label: p.label })), [], {
+      keepRange: dragging,
+      extra: {
+        lines: [{ x: bx.tB, label: `Box ${day(bx.box)}` }, { x: bx.tD, label: `Dlv ${day(bx.delivery)}` }],
+        segments: [{ x0: bx.tB, x1: bx.tD, y: bx.fwd }],
+        marks: [{ x: bx.tD, y: bx.rD, label: `${bx.rD.toFixed(3)}` }],
+      },
+    });
+    if (dragging) return;
+    const premium = el("input", { type: "number", step: "1", value: st.premium, "aria-label": "Boxing premium in bp" });
+    premium.addEventListener("change", () => { st.premium = +premium.value || 0; recompute(); });
+    boxHost.replaceChildren(
+      el("label", {}, "Boxing premium (bp) ", premium),
+      el("span", {}, `${bx.code} boxing ${day(bx.box)} → delivery ${day(bx.delivery)}: repo to boxing ${bx.rB.toFixed(3)}%, `,
+        `forward GC ${bx.fwdGC.toFixed(3)}% − premium = ${bx.fwd.toFixed(3)}% (red), term repo to delivery `,
+        el("b", { class: "amber" }, `${bx.rD.toFixed(3)}%`), ` vs GC ${bx.gcD.toFixed(3)}%.`));
+    repoNote.textContent = `${markets[mcode].repo.source} Drag points to change the GC curve; the 3M point sets the GC column ` +
+      "(each row can be overwritten). The boxing premium is how far below GC the CTD's repo trades between boxing and delivery " +
+      "(positive = special, as shorts box the CTD); it sets the repo to delivery used for the hedge futures' net basis.";
+  }
+
+  // ---- auctions and syndications
+  function renderAuctions() {
+    const info = auctions?.markets?.[mcode];
+    if (!info) { auctionHost.replaceChildren(el("p", { class: "muted" }, "Auction data unavailable.")); return; }
+    const deals = [...info.deals].sort((a, b) => (a.status === b.status ? a.date.localeCompare(b.date) : a.status === "upcoming" ? -1 : 1));
+    auctionHost.replaceChildren(
+      deals.length ? el("div", { class: "table-wrap", style: { maxHeight: "300px" } }, el("table", {},
+        el("thead", {}, el("tr", {}, ["Date", "Status", "Type", "Bond", "ISIN", "Maturity", "Coupon", "Size", "Result", "Source"]
+          .map((h, i) => el("th", { class: i < 5 || i === 9 ? "l" : "" }, h)))),
+        el("tbody", {}, deals.map((d) => el("tr", { class: d.status === "upcoming" ? "upcoming" : "" },
+          el("td", { class: "l" }, d.date), el("td", { class: `l ${d.status === "upcoming" ? "pos" : "muted"}` }, d.status),
+          el("td", { class: "l" }, d.kind), el("td", { class: "l" }, d.name + (d.reopening ? " (reopening)" : d.reopening === false ? " (new)" : "")),
+          el("td", { class: "l" }, d.id ?? "–"), el("td", {}, d.maturity ?? "–"), el("td", {}, d.coupon == null ? "–" : `${d.coupon}%`),
+          el("td", {}, d.size ?? "–"), el("td", {}, d.result ?? "–"),
+          el("td", { class: "l" }, d.link ? el("a", { href: d.link, target: "_blank", rel: "noopener" }, "official ↗") : "–")))))) :
+        el("p", { class: "muted" }, "No auctions or syndications in the window."),
+      el("p", { class: "note" }, `Source: ${info.source} (`, info.calendar ? el("a", { href: info.calendar, target: "_blank", rel: "noopener" }, "calendar") : "–",
+        `). Last 3 weeks and next 6 weeks; sizes as announced (planned volume or offered range). Starred on the yield chart.`));
   }
 
   // ---- calculations
@@ -93,8 +153,11 @@ function start(contracts, markets) {
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
     const repoMarket = { ...market, repo: { ...market.repo, points: st.repo } };
+    const bx = boxing();
     const legs = FUTURES_BY_MARKET[mcode].map((code) => {
-      const s = contractSummary(code, contracts[code], repoMarket);
+      // Contracts delivering with the main one are financed at the boxing-adjusted term repo.
+      const opts = contracts[code].delivery === contracts[bx.code].delivery ? { repo: bx.rD } : {};
+      const s = contractSummary(code, contracts[code], repoMarket, opts);
       if (!s) return null;
       const row = byId.get(s.ctd.id);
       return row ? { ...s, t: row.t, row } : null;
@@ -115,15 +178,16 @@ function start(contracts, markets) {
       r.rob = (((c + rd) * r.dv01 - nb) / r.dirty) * 100;       // % of the bond's dirty price
       r.roc = r.rob / (st.haircut / 100);
     }
-    return { rows, legs, gc3m };
+    return { rows, legs, gc3m, bx };
   }
 
   // ---- render
   let table = null;
-  function recompute() {
+  function recompute({ dragging = false } = {}) {
     const market = markets[mcode];
     const st = stateFor(mcode);
-    const { rows, legs, gc3m } = compute();
+    const { rows, legs, gc3m, bx } = compute();
+    renderRepo(bx, dragging);
     renderHedge(legs);
     renderChart(rows, legs);
     const q = st.search.toLowerCase();
@@ -139,7 +203,10 @@ function start(contracts, markets) {
       cls: colour ? (r) => signClass(r[key], 0.5 * 10 ** -d) : null, bg: colour ? (r) => heat(r[key], sc[key]) : null,
     });
     const columns = [
-      { key: "name", label: "Bond", fmt: (r) => `${legs.some((l) => l.ctd.id === r.id) ? "◆ " : ""}${r.name}`, value: (r) => r.t, left: true,
+      { key: "name", label: "Bond", fmt: (r) => {
+        const ctdOf = legs.filter((l) => l.ctd.id === r.id).map((l) => l.code);
+        return ctdOf.length ? `◆ ${r.name}  ${ctdOf.join("/")} CTD` : r.name;
+      }, value: (r) => r.t, left: true,
         tip: (r) => `${r.name}  coupon ${r.coupon}%  maturity ${r.maturity}  price ${r.price.toFixed(3)}  beta ${r.beta}` },
       { key: "group", label: "Type", fmt: (r) => r.group, left: true },
       { key: "yield", label: "Yield", unit: "%", fmt: (r) => r.yield.toFixed(3), value: (r) => r.yield },
@@ -164,13 +231,13 @@ function start(contracts, markets) {
       num("roc", "Return on capital", "%", 2, `Return on book / repo haircut (${st.haircut}%), over 3 months`),
     ];
     const groupsHead = [{ span: 11, label: "" }, { span: legs.length, label: "Futures hedge weight" }, { span: 5, label: "After hedge, 3 months" }];
-    table = dataTable(columns, { sortKey: "t", sortAsc: true, groups: groupsHead, rowClass: (r) => (legs.some((l) => l.ctd.id === r.id) ? "hl" : null) });
+    table = dataTable(columns, { sortKey: "t", sortAsc: true, groups: groupsHead, rowClass: (r) => (legs.some((l) => l.ctd.id === r.id) ? "ctd" : null) });
     table.node.classList.add("sticky-first");
     table.update(shown);
     tableHost.replaceChildren(table.node);
 
     count.textContent = `${shown.length} of ${rows.length} bonds · prices as of ${market.asOf} · GC 3M ${gc3m.toFixed(3)}%`;
-    tableNote.textContent = "◆ = CTD of a front futures contract. Click a header to sort. GC and special are editable per bond (special: negative when the bond trades special in repo). " +
+    tableNote.textContent = "Highlighted ◆ rows are the CTDs of the front futures contracts. Click a header to sort. GC and special are editable per bond (special: negative when the bond trades special in repo). " +
       "Carry, roll and returns are over 3 months; returns are not annualised.";
   }
 
@@ -231,14 +298,31 @@ function start(contracts, markets) {
     traces.push({ type: "scatter", mode: "markers+text", name: "Futures CTD", x: legs.map((l) => l.t), y: legs.map((l) => l.row.yield),
       text: legs.map((l) => l.code), textposition: "top center", textfont: { color: "#ffd24d", size: 11 },
       marker: { symbol: "diamond-open", size: 12, color: "#ffd24d", line: { width: 2 } }, hovertemplate: "%{text} CTD<extra></extra>" });
+    // Auctions / syndications: existing lines at their yield, new issues on the fitted curve at their maturity.
+    const settle = parseDate(market.settle);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const deals = (auctions?.markets?.[mcode]?.deals ?? []).map((d) => {
+      const r = d.id && byId.get(d.id);
+      if (r) return { d, x: r.t, y: r.yield };
+      if (!d.maturity) return null;
+      const t = yearsBetween(settle, parseDate(d.maturity));
+      return t > 0 ? { d, x: t, y: nsEval(market.curve, t) } : null;
+    }).filter(Boolean);
+    for (const [status, color] of [["upcoming", "#3ddc84"], ["recent", "#c58cff"]]) {
+      const ds = deals.filter((p) => p.d.status === status);
+      if (!ds.length) continue;
+      traces.push({ type: "scatter", mode: "markers", name: `${status === "upcoming" ? "Upcoming" : "Recent"} auction / syndicate`,
+        x: ds.map((p) => p.x), y: ds.map((p) => p.y), marker: { symbol: "star", size: 15, color: "rgba(0,0,0,0)", line: { color, width: 2 } },
+        text: ds.map((p) => `${p.d.date} ${p.d.kind}: ${p.d.name}${p.d.id ? ` ${p.d.id}` : ""}<br>size ${p.d.size ?? "–"}`),
+        hovertemplate: "%{text}<extra></extra>" });
+    }
     plot(chart, traces, { xaxis: { title: { text: "Years to maturity" } }, yaxis: { title: { text: "Yield (%)" } }, legend: { y: -0.22 } }, 330);
   }
 
   function selectMarket(m) {
     mcode = m;
     setHash({ m });
-    renderNews();
-    renderRepo();
+    renderAuctions();
     renderControls();
     recompute();
   }
@@ -255,5 +339,7 @@ function methodNote() {
       el("li", {}, "Roll 3m: a Nelson-Siegel curve is fitted separately to each issue type (e.g. 2y, 5y, 10y, 30y Treasuries; Schatz, Bobl, Bund, green Bunds; BTP; OAT). Assuming that curve is unchanged in 3 months, roll = curve(T) − curve(T − 0.25), in bp; positive means the yield falls."),
       el("li", {}, "Hedge: UST, Bund and BTP use a fly hedge across the two futures whose CTDs bracket the bond's maturity, split linearly by maturity; bonds beyond the shortest or longest CTD, and the CTDs themselves, use the nearest contract alone. OATs use the OAT future alone. Weights are shares of the bond's DV01."),
       el("li", {}, "Hedged carry and roll = bond − Σ weight × CTD (bp, so DV01-neutral). Hedge net basis = Σ weight × (bond DV01 / CTD DV01) × CTD net basis, in cents per 100 nominal of the bond: a short futures position pays away the net basis (the value of the delivery option) as delivery approaches. The front contract may deliver before the 3-month horizon."),
-      el("li", {}, "Return on book = [(hedged carry + roll) × DV01 − hedge net basis] / dirty price. Return on capital = return on book / haircut. Both over 3 months, not annualised.")));
+      el("li", {}, "Return on book = [(hedged carry + roll) × DV01 − hedge net basis] / dirty price. Return on capital = return on book / haircut. Both over 3 months, not annualised."),
+      el("li", {}, "Boxing: futures shorts must hold (box) the CTD into delivery, so its repo often trades special from about 5 business days before delivery. Term repo to delivery = [repo to boxing × t_box + (forward GC − premium) × (t_delivery − t_box)] / t_delivery; it finances the CTDs of contracts delivering on that date."),
+      el("li", {}, "Auctions and syndications: TreasuryDirect (UST), Finanzagentur issuance calendar and syndicates (Bunds), MEF auction announcements (BTPs). AFT does not allow automated access to its site, so OAT dates follow its standing calendar (long-term OATs on the first Thursday, medium-term on the third); the lines and amounts AFT announces shortly before each auction are on its site.")));
 }

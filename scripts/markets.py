@@ -1,6 +1,6 @@
 """Build data/markets/<UST|DE|FR|IT>.json: every nominal fixed-coupon government bond with
 price, yield, DV01, 3-month realised yield volatility and beta to the curve; a Nelson-Siegel
-curve per issue type (used for roll down); generic curve points; a repo curve proxy; news.
+curve per issue type (used for roll down); generic curve points; a repo curve proxy.
 
 Sources
 - UST: TreasuryDirect FedInvest end-of-day prices, one date per query, so yields are archived
@@ -10,16 +10,13 @@ Sources
   one sheet per trading day).
 - OATs and BTPs: Borsa Italiana (MOT / EuroMOT) bond lists and daily closing prices.
 - EUR repo proxy: €STR and the ECB AAA euro area government spot curve.
-- News: Google News RSS search.
 """
 
 import csv
 import io
 import re
 import time
-import xml.etree.ElementTree as ET
 from datetime import date, datetime, timedelta, timezone
-from email.utils import parsedate_to_datetime
 
 import numpy as np
 import pandas as pd
@@ -31,14 +28,10 @@ from common import (DATA, UA, add_business_days, curve_eval, dv01, frac_name, ge
 WINDOW = 63           # trading days in the realised-vol window (3 months)
 HISTORY_DAYS = 100    # calendar days of history fetched / kept
 MARKETS = {
-    "UST": {"name": "US Treasuries", "currency": "$", "freq": 2, "settle": 1, "nodes": [2, 5, 7, 10, 20, 30],
-            "news": "Treasury yields"},
-    "DE": {"name": "German Bunds", "currency": "€", "freq": 1, "settle": 2, "nodes": [2, 5, 10, 15, 30],
-           "news": "Bund yields"},
-    "FR": {"name": "French OATs", "currency": "€", "freq": 1, "settle": 2, "nodes": [2, 5, 10, 15, 30],
-           "news": "French government bonds OAT"},
-    "IT": {"name": "Italian BTPs", "currency": "€", "freq": 2, "settle": 2, "nodes": [2, 5, 10, 15, 30],
-           "news": "Italian government bonds BTP"},
+    "UST": {"name": "US Treasuries", "currency": "$", "freq": 2, "settle": 1, "nodes": [2, 5, 7, 10, 20, 30]},
+    "DE": {"name": "German Bunds", "currency": "€", "freq": 1, "settle": 2, "nodes": [2, 5, 10, 15, 30]},
+    "FR": {"name": "French OATs", "currency": "€", "freq": 1, "settle": 2, "nodes": [2, 5, 10, 15, 30]},
+    "IT": {"name": "Italian BTPs", "currency": "€", "freq": 2, "settle": 2, "nodes": [2, 5, 10, 15, 30]},
 }
 
 
@@ -264,22 +257,6 @@ def eur_repo():
     }
 
 
-# ---------------------------------------------------------------- news
-
-def news(query):
-    url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}+when:7d&hl=en-GB&gl=GB&ceid=GB:en"
-    items = ET.fromstring(get(url).content).iter("item")
-    out = []
-    for it in items:
-        source = it.findtext("source") or ""
-        title = it.findtext("title") or ""
-        if source and title.endswith(f" - {source}"):
-            title = title[: -len(source) - 3]
-        out.append({"title": title, "link": it.findtext("link"), "source": source,
-                    "date": parsedate_to_datetime(it.findtext("pubDate")).strftime("%Y-%m-%d %H:%M")})
-    return sorted(out, key=lambda x: x["date"], reverse=True)[:10]
-
-
 # ---------------------------------------------------------------- analytics
 
 def winsorise(x, k=4):
@@ -368,11 +345,6 @@ def build(code):
     bonds, yields = SOURCES[code]()
     data = analyse(code, bonds, yields)
     data["repo"] = us_repo() if code == "UST" else eur_repo()
-    try:
-        data["news"] = news(MARKETS[code]["news"])
-    except Exception as e:  # news is optional
-        print(f"  news failed: {e}")
-        data["news"] = []
     write_json(DATA / "markets" / f"{code}.json", data)
     print(f"{code}: {len(data['bonds'])} bonds as of {data['asOf']}")
 

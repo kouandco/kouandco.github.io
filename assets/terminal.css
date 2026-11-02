@@ -119,19 +119,10 @@ td.neg { color: var(--down); }
 .tile .v { font-size: 16px; }
 .tile .n { color: var(--muted); font-size: 11px; }
 
-/* ---- news ticker ---- */
-.news { display: flex; gap: 0; border: 1px solid var(--line); background: var(--panel); overflow: hidden; }
-.news .lead { flex: 0 0 auto; background: var(--down); color: #000; font-weight: 700; padding: 6px 10px; }
-.news .top { padding: 6px 10px; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.news .top a { color: var(--text); }
-.news .top .src { color: var(--muted); margin-left: 8px; }
-.ticker { border: 1px solid var(--line); border-top: 0; overflow: hidden; white-space: nowrap; background: #050505; }
-.ticker .track { display: inline-block; padding: 4px 0; animation: scroll 90s linear infinite; }
-.ticker:hover .track { animation-play-state: paused; }
-.ticker a { color: var(--yellow); margin: 0 28px 0 0; }
-.ticker .src { color: var(--muted); margin-left: 6px; }
-@keyframes scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
-@media (prefers-reduced-motion: reduce) { .ticker .track { animation: none; } }
+/* ---- highlighted rows ---- */
+tr.ctd td { border-top: 1px solid var(--amber); border-bottom: 1px solid var(--amber); }
+tr.ctd td:first-child, .sticky-first tr.ctd td:first-child { background: var(--amber); color: #000; font-weight: 700; }
+tr.upcoming td { background: rgba(61, 220, 132, 0.07); }
 
 /* ---- curve editor ---- */
 .curve-editor svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; }

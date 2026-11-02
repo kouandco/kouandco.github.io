@@ -6,8 +6,8 @@ pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 L
 | Page | What it shows |
 |------|---------------|
 | `homepage.html` | Menu of the tools and a snapshot of generic yields (`index.html` redirects here) |
-| `CTD.html` | Bond futures CTD model: CTD probabilities, fair futures and fair net basis from a parametric normal model; draggable generic curve with drift and vol per point; editable basket |
-| `BMNT.html` | Bond monitor: every nominal UST, Bund, OAT and BTP with realised vol, 3m carry and roll down, editable repo, futures fly hedge and hedged returns |
+| `CTD.html` | Bond futures CTD model: CTD probabilities, fair futures and fair net basis from a parametric normal model; draggable generic curve with drift and vol per point; editable basket, bonds can be added |
+| `BMNT.html` | Bond monitor: every nominal UST, Bund, OAT and BTP with realised vol, 3m carry and roll down, editable repo curve with boxing premium, futures fly hedge and hedged returns, recent and upcoming auctions |
 | `EURX.html` | Eurex EFP gross basis and EFS invoice spreads, trade by trade |
 | `FIHG.html` | DV01 hedge calculator with futures or bonds, single or fly |
 
@@ -16,8 +16,8 @@ pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 L
 - `assets/`: shared theme (`terminal.css`), page frame and table helpers (`common.js`), bond maths
   (`bond.js`), futures model and hedge helpers (`futures.js`), the draggable curve (`curve-editor.js`)
   and one `page-*.js` per page.
-- `data/`: everything the pages read. `markets/<UST|DE|FR|IT>.json` (bonds, curves, repo proxy, news),
-  `futures.json` (front contracts and baskets), `eurex_trades.json`, `meta.json` (refresh status).
+- `data/`: everything the pages read. `markets/<UST|DE|FR|IT>.json` (bonds, curves, repo proxy),
+  `futures.json` (front contracts and baskets), `auctions.json` (recent and upcoming auctions and syndications), `eurex_trades.json`, `meta.json` (refresh status).
   `data/eurex/` archives Eurex's daily trade files (Eurex lists only ~20 days) and `data/history/`
   the TreasuryDirect yield history (queried one date at a time). Do not delete either.
 - `scripts/`: the Python builders. `refresh.py` runs them all; each step that fails keeps its previous

@@ -3,7 +3,7 @@
 
 export const PAGES = [
   { code: "HOME", href: "homepage.html", title: "Home" },
-  { code: "CTD", href: "CTD.html", title: "Bond Futures CTD Monte Carlo" },
+  { code: "CTD", href: "CTD.html", title: "Bond Futures CTD" },
   { code: "BMNT", href: "BMNT.html", title: "Bond Monitor" },
   { code: "EURX", href: "EURX.html", title: "Eurex Flow" },
   { code: "FIHG", href: "FIHG.html", title: "Fixed Income Hedge" },
