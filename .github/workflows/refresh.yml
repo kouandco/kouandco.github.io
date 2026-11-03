@@ -2,8 +2,8 @@ name: Refresh data
 
 # Every weekday at 10:00 London time. GitHub cron runs in UTC, so it fires at 09:00 and
 # 10:00 UTC (10:00 London in summer and winter respectively) plus an 11:00 UTC backup in case
-# a run is delayed or fails; the first step skips runs before 10:00 London or after one has
-# already succeeded that day.
+# a run is delayed or a source fails; the first step skips runs before 10:00 London or after
+# every step has already succeeded that day.
 on:
   schedule:
     - cron: "0 9,10,11 * * 1-5"
@@ -28,7 +28,8 @@ jobs:
         run: |
           hour=$(TZ=Europe/London date +%H)
           today=$(TZ=Europe/London date +%Y-%m-%d)
-          done=$(python3 -c "import json;print(json.load(open('data/meta.json')).get('refreshed','')[:10])" 2>/dev/null || true)
+          # Only "done" once every step succeeded today, so the backup run retries failed sources.
+          done=$(python3 -c "import json;m=json.load(open('data/meta.json'));print(m.get('refreshed','')[:10] if all(s['ok'] for s in m['steps'].values()) else '')" 2>/dev/null || true)
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] || { [ "$hour" -ge 10 ] && [ "$done" != "$today" ]; }; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

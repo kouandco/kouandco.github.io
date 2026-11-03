@@ -14,9 +14,11 @@ Sources
 
 import csv
 import io
+import json
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
+from functools import cache
 
 import numpy as np
 import pandas as pd
@@ -248,6 +250,7 @@ def ecb_last(key):
     return row["TIME_PERIOD"], float(row["OBS_VALUE"])
 
 
+@cache  # one fetch per run serves DE, FR and IT
 def eur_repo():
     day, estr = ecb_last("EST/B.EU000A2X2A25.WT")
     points = [{"label": "S/N", "t": 1 / 365, "rate": estr}]  # no free S/N GC rate; €STR stands in
@@ -348,8 +351,18 @@ SOURCES = {"UST": ust, "DE": bundesbank, "FR": oat, "IT": btp}
 def build(code):
     bonds, yields = SOURCES[code]()
     data = analyse(code, bonds, yields)
-    data["repo"] = us_repo() if code == "UST" else eur_repo()
-    write_json(DATA / "markets" / f"{code}.json", data)
+    path = DATA / "markets" / f"{code}.json"
+    try:
+        data["repo"] = us_repo() if code == "UST" else eur_repo()
+    except Exception as e:
+        # A repo source outage shouldn't discard fresh bond prices: keep the last repo curve.
+        prev = json.loads(path.read_text()).get("repo") if path.exists() else None
+        if not prev:
+            raise
+        print(f"{code}: repo fetch failed ({type(e).__name__}: {e}); keeping previous repo curve")
+        source = re.sub(r" \(stale: .*\)$", "", prev["source"])
+        data["repo"] = {**prev, "source": f"{source} (stale: refresh failed {date.today()})"}
+    write_json(path, data)
     print(f"{code}: {len(data['bonds'])} bonds as of {data['asOf']}")
 
 
