@@ -416,7 +416,32 @@ def add_asw(code, data, curve_set):
                          f"{curve_set[next(iter(curve_set))].as_of}.")
 
 
-def write_gp(code, data, yields):
+FIT_TENORS = [2, 5, 10, 30]
+
+
+def fit_history(bonds, yields):
+    """The all-bond Nelson-Siegel curve at 2, 5, 10 and 30 years for every day of the history, fitted as
+    in analyse(): maturities from that day, bad prints (> 40bp off a first fit) dropped, at least 8 bonds."""
+    maturity = dict(zip(bonds.id, bonds.maturity))
+    ids = [i for i in yields.columns if i in maturity]
+    mats = np.array([pd.Timestamp(maturity[i]).value for i in ids], dtype=float)
+    out = {t: [] for t in FIT_TENORS}
+    for day, row in yields[ids].iterrows():
+        t = (mats - day.value) / (365.25 * 864e11)
+        y = row.values.astype(float)
+        ok = ~np.isnan(y) & (t > 0.25)
+        nodes = [None] * len(FIT_TENORS)
+        if ok.sum() >= 8:
+            fit = ns_fit(t[ok], y[ok])
+            keep = ok & (np.abs(y - curve_eval(fit, t)) < 0.4)
+            if keep.sum() >= 8:
+                nodes = [round(float(v), 4) for v in curve_eval(ns_fit(t[keep], y[keep]), FIT_TENORS)]
+        for k, v in zip(FIT_TENORS, nodes):
+            out[k].append(v)
+    return out
+
+
+def write_gp(code, data, yields, bonds):
     """data/gp/<code>.json: daily yield (and ASW, archived from the day it was added) of every current bond."""
     ids = [b["id"] for b in data["bonds"]]
     y = yields.reindex(columns=ids).dropna(how="all")
@@ -429,7 +454,10 @@ def write_gp(code, data, yields):
         asw.index.name = "date"
         asw.to_csv(asw_path, float_format="%.1f")
     col = lambda df, i, d: [None if pd.isna(v) else round(float(v), d) for v in df[i]] if i in df else None
+    all_days = yields.dropna(how="all").sort_index()
     write_json(DATA / "gp" / f"{code}.json", {
+        "fitDates": [str(d.date()) for d in all_days.index],
+        "fit": {str(k): v for k, v in fit_history(bonds, all_days).items()},
         "market": code, "freq": data["freq"], "settleDays": MARKETS[code]["settle"],
         "dates": [str(d.date()) for d in y.index],
         "bonds": [{"id": b["id"], "name": b["name"], "group": b["group"], "coupon": b["coupon"], "maturity": b["maturity"]}
@@ -447,7 +475,7 @@ def build(code):
     data = analyse(code, bonds, yields)
     add_asw(code, data, curves.load())
     data["benchmarks"] = benchmarks(code, data["bonds"], date.fromisoformat(data["settle"]))
-    write_gp(code, data, yields)
+    write_gp(code, data, yields, bonds)
     path = DATA / "markets" / f"{code}.json"
     try:
         data["repo"] = us_repo() if code == "UST" else eur_repo()

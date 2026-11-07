@@ -9,12 +9,15 @@ const app = $("#app");
 //   G|market|tenor|y·p·a  generic: the current benchmark bond at that tenor
 //   S|label               par swap rate          F|contract|expiry           Eurex futures daily VWAP
 //   X|contract|expiry|isin gross basis           I|contract|expiry|leg       invoice spread
-//   W|bank|meeting        implied policy rate    =expression|name            formula over basket letters
+//   W|bank|meeting        implied policy rate (or a constant-horizon pricing series, e.g. W|Fed|Next meeting move bp)
+//   C|market|tenor        fitted curve           P|name                      policy rate or overnight fixing
+//   =expression|name      formula over basket letters
 const MEASURES = { y: { label: "Yield", unit: "%" }, p: { label: "Price", unit: "pts" }, a: { label: "ASW", unit: "bp" } };
 const KINDS = [
-  { code: "bond", label: "Bond" }, { code: "generic", label: "Generic" }, { code: "swap", label: "Swap" },
-  { code: "fut", label: "Futures" }, { code: "basis", label: "Basis" }, { code: "inv", label: "Invoice spread" },
-  { code: "wirp", label: "WIRP" }, { code: "formula", label: "Formula" },
+  { code: "bond", label: "Bond" }, { code: "generic", label: "Generic" }, { code: "fitted", label: "Fitted curve" },
+  { code: "swap", label: "Swap" }, { code: "fut", label: "Futures" }, { code: "basis", label: "Basis" },
+  { code: "inv", label: "Invoice spread" }, { code: "policy", label: "Policy rate" }, { code: "wirp", label: "WIRP" },
+  { code: "formula", label: "Formula" },
 ];
 const RANGES = [{ code: "1M", label: "1M", days: 31 }, { code: "3M", label: "3M", days: 92 }, { code: "6M", label: "6M", days: 183 },
   { code: "1Y", label: "1Y", days: 366 }, { code: "All", label: "All", days: Infinity }];
@@ -59,6 +62,14 @@ async function resolve(key) {
     }
     return { label: `${name} ${MEASURES[measure].label.toLowerCase()}`, unit: MEASURES[measure].unit, points };
   }
+  if (kind === "C") {
+    const gp = await gpData(p[0]);
+    const v = gp.fit?.[p[1]];
+    if (!v) throw new Error(`no ${p[0]} fitted curve history`);
+    return { label: `${p[0]} ${p[1]}Y fitted curve`, unit: "%", points: gp.fitDates.map((d, i) => [d, v[i]]) };
+  }
+  if (kind === "P") return fromTable(store.policy, p[0], p[0], "%");
+  if (kind === "W" && !/^\d{4}-/.test(p[1])) return fromTable(store.wirp, `${p[0]}|${p[1]}`, `${p[0]} ${p[1].replace(/ (bp|%)$/, "")}`, p[1].endsWith("%") ? "%" : "bp");
   if (kind === "S") return fromTable(store.swaps, p[0], `${p[0]} swap`, "%");
   if (kind === "F") return fromTable(store.eurex, `FUT|${p[0]}|${p[1]}`, `${p[0]} ${p[1]} futures`, "pts");
   if (kind === "X") return fromTable(store.eurex, `BASIS|${p.join("|")}`, `${p[0]} ${p[1]} basis ${basketBondName(p[0], p[2])}`, "c");
@@ -128,6 +139,7 @@ async function start() {
     const [letter, key] = item.includes("~") ? item.split("~") : [null, item];
     await addSeries(key, false, letter).catch((e) => console.warn(key, e));
   }
+  for (const s of state.basket) if ((params.get("h") ?? "").includes(s.letter)) s.show = false;
   state.x ??= state.basket[0]?.letter;
   state.y ??= state.basket[1]?.letter ?? state.x;
 
@@ -147,6 +159,8 @@ async function start() {
 
   function saveHash() {
     const p = new URLSearchParams({ s: state.basket.map((s) => `${s.letter}~${s.key}`).join(","), r: state.range, v: state.view, sm: state.scatterMode });
+    const hidden = state.basket.filter((s) => s.show === false).map((s) => s.letter).join("");
+    if (hidden) p.set("h", hidden);
     if (state.x) p.set("x", state.x);
     if (state.y) p.set("y", state.y);
     history.replaceState(null, "", `#${p}`);
@@ -210,6 +224,12 @@ async function start() {
       fill();
       const ms = measureSel();
       controls = [marketSel, tenorSel, ms, el("button", { class: "btn", onclick: () => add(`G|${marketSel.value}|${tenorSel.value}|${ms.value}`) }, "Add")];
+    } else if (state.kind === "fitted") {
+      const tenorSel = select([2, 5, 10, 30].map((t) => [t, `${t}Y`]), 10);
+      controls = [marketSel, tenorSel, el("button", { class: "btn", onclick: () => add(`C|${marketSel.value}|${tenorSel.value}`) }, "Add")];
+    } else if (state.kind === "policy") {
+      const s = select(Object.keys(store.policy.series).map((k) => [k, k]));
+      controls = [s, el("button", { class: "btn", onclick: () => add(`P|${s.value}`) }, "Add")];
     } else if (state.kind === "swap") {
       const s = select(Object.keys(store.swaps.series).map((k) => [k, k]), "EUR 6M 10Y");
       controls = [s, el("button", { class: "btn", onclick: () => add(`S|${s.value}`) }, "Add")];
@@ -231,7 +251,10 @@ async function start() {
     } else if (state.kind === "wirp") {
       const bankSel = select(["Fed", "ECB", "BoE"].map((b) => [b, b]), "Fed");
       const mSel = el("select");
-      const fill = () => mSel.replaceChildren(...Object.keys(store.wirp.series).filter((k) => k.startsWith(`${bankSel.value}|`)).map((k) => el("option", { value: k }, k.split("|")[1])));
+      // Constant-horizon series first (they carry on as meetings pass), then each meeting's implied rate.
+      const fill = () => mSel.replaceChildren(...Object.keys(store.wirp.series).filter((k) => k.startsWith(`${bankSel.value}|`))
+        .sort((a, b) => /\|\d{4}-/.test(a) - /\|\d{4}-/.test(b) || a.localeCompare(b))
+        .map((k) => el("option", { value: k }, /\|\d{4}-/.test(k) ? `${k.split("|")[1]} meeting: implied rate` : k.split("|")[1])));
       bankSel.addEventListener("change", fill);
       fill();
       controls = [bankSel, mSel, el("button", { class: "btn", onclick: () => add(`W|${mSel.value}`) }, "Add")];
@@ -247,7 +270,9 @@ async function start() {
       fut: "Daily VWAP of the futures leg of Eurex EFP and EFS trades.",
       basis: "Gross basis = cash − futures × CF in cents, daily VWAP of EFP trades.",
       inv: "Invoice spread = swap rate − futures-implied yield of the matched deliverable, bp, daily VWAP of EFS trades. Lower / upper: the two clusters most likely €STR and 6M Euribor swaps.",
-      wirp: "Implied policy rate after a meeting, from the WIRP page, archived daily.",
+      fitted: "Nelson-Siegel curve fitted to all of the market's nominal bonds each day (bad prints over 40bp dropped). Bonds that have since matured are not in the OAT and BTP fits.",
+      policy: "Policy rates and overnight fixings over two years: NY Fed, ECB Data Portal, Bank of England database.",
+      wirp: "Pricing from the WIRP page, archived daily: the move priced at the next meeting, the cumulative move and implied rate 6M and 1Y ahead, or one meeting's implied rate.",
       formula: "Combine series by letter: (B-A)*100 for a spread in bp, (2*B-A-C)*100 for a fly. Dates where every series has a value.",
     }[state.kind];
     picker.replaceChildren(el("h2", {}, "Add a series"),
@@ -260,18 +285,22 @@ async function start() {
   function renderBasket() {
     basketPanel.replaceChildren(el("h2", {}, "Basket"),
       state.basket.length ? el("div", { class: "table-wrap" }, el("table", {},
-        el("thead", {}, el("tr", {}, ["", "Series", "Unit", "Obs", "Last", "Right axis", ""].map((h, i) => el("th", { class: i < 2 ? "l" : "" }, h)))),
+        el("thead", {}, el("tr", {}, ["", "Series", "Unit", "Obs", "Last", "Show", "Right axis", ""].map((h, i) => el("th", { class: i < 2 ? "l" : "" }, h)))),
         el("tbody", {}, state.basket.map((s, i) => {
           const obs = s.points.filter(([, v]) => v != null);
           const last = obs.at(-1);
           const axis = el("input", { type: "checkbox", checked: s.right || null, "aria-label": `Right axis for ${s.letter}` });
           axis.addEventListener("change", () => { s.right = axis.checked; renderLine(); });
+          // Hidden series stay in the basket for formulas, the scatter and the tables, but not on the chart.
+          const show = el("input", { type: "checkbox", checked: s.show !== false || null, "aria-label": `Show ${s.letter} on the chart` });
+          show.addEventListener("change", () => { s.show = show.checked; saveHash(); renderLine(); });
           return el("tr", {},
             el("td", { class: "l" }, el("span", { style: { color: COLORS[i % COLORS.length], fontWeight: 700 } }, s.letter)),
             el("td", { class: "l", title: s.key }, s.formula ? `${s.label} = ${s.formula}` : s.label),
             el("td", {}, s.unit),
             el("td", {}, obs.length),
             el("td", { title: last?.[0] }, last ? `${fmt.n(last[1], s.unit === "%" ? 3 : 2)} (${last[0]})` : "–"),
+            el("td", {}, show),
             el("td", {}, axis),
             el("td", {}, el("button", { class: "btn", onclick: () => removeSeries(s.letter), "aria-label": `Remove ${s.letter}` }, "×")));
         })))) : el("p", { class: "muted" }, "Empty: add series on the left."),
@@ -294,9 +323,10 @@ async function start() {
   function renderLine() {
     linePanel.replaceChildren(el("div", { class: "row", style: { justifyContent: "space-between" } },
       el("h2", {}, "History"), segmented(VIEWS, state.view, (v) => { state.view = v; saveHash(); renderLine(); })), lineChart);
-    const leftUnits = new Set(state.basket.filter((s) => !s.right).map((s) => s.unit));
-    const rightUnits = new Set(state.basket.filter((s) => s.right).map((s) => s.unit));
-    const traces = state.basket.map((s, i) => {
+    const shown = state.basket.filter((s) => s.show !== false);
+    const leftUnits = new Set(shown.filter((s) => !s.right).map((s) => s.unit));
+    const rightUnits = new Set(shown.filter((s) => s.right).map((s) => s.unit));
+    const traces = state.basket.map((s, i) => ({ s, i })).filter(({ s }) => s.show !== false).map(({ s, i }) => {
       let pts = clean(s);
       if (state.view === "rebased" && pts.length) pts = pts.map(([d, v]) => [d, v - pts[0][1]]);
       if (state.view === "diff") pts = pts.slice(1).map(([d, v], j) => [d, v - pts[j][1]]);
@@ -306,7 +336,11 @@ async function start() {
         line: { color: COLORS[i % COLORS.length], width: 1.6 }, marker: { color: COLORS[i % COLORS.length], size: 4 },
         hovertemplate: `${s.letter} %{x|%d %b %Y}: %{y:.4f} ${s.unit}<extra></extra>` };
     });
-    if (!traces.length) { lineChart.replaceChildren(el("p", { class: "muted" }, "Nothing to plot.")); return; }
+    if (!traces.length) {
+      window.Plotly.purge(lineChart);
+      lineChart.replaceChildren(el("p", { class: "muted" }, "Nothing to plot: every series is hidden or the basket is empty."));
+      return;
+    }
     plot(lineChart, traces, {
       xaxis: { type: "date" },
       yaxis: { title: { text: [...leftUnits].join(" / ") } },
@@ -448,6 +482,10 @@ function methodNote() {
       + "converted to yields at the market's settlement convention. Up to two years are kept; Bund history starts in July 2026, UST history is backfilled a month per daily run."),
     el("li", {}, "ASW: par-par asset swap spread vs SOFR (UST) or 6M Euribor with €STR discounting (euro area), from Eurex Clearing's daily curves; archived from November 2026."),
     el("li", {}, "Swap rates: spot-starting par rates from the same curves (fixed annual; EUR 6M floating semi-annual)."),
+    el("li", {}, "Fitted curves: the Nelson-Siegel curve through all of a market's nominal bonds, refitted for every day of the yield history. "
+      + "It sits above the on-the-run benchmarks where older, cheaper issues dominate (UST 10Y by about 15bp)."),
+    el("li", {}, "Policy rates and fixings: NY Fed (target range, EFFR), ECB Data Portal (deposit facility rate, €STR), Bank of England database (Bank Rate, SONIA), two years."),
+    el("li", {}, "WIRP pricing is archived from November 2026: the Eurex Clearing file holds only the latest curves, so earlier dates cannot be rebuilt."),
     el("li", {}, "Futures, gross basis and invoice spreads: daily volume-weighted averages of Eurex EFP and EFS trades (the trade archive starts in October 2026). "
       + "No free source exists for CME futures prices, so UST futures are not available."),
     el("li", {}, "Generic series follow today's benchmark bond back in time; they do not splice in the previous benchmark, so a new issue starts a short history.")));
@@ -459,6 +497,7 @@ try {
     loadJSON("data/gp/eurex.json"), loadJSON("data/gp/swaps.json"), loadJSON("data/gp/wirp.json"), loadJSON("data/futures.json"),
     ...MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))]);
   MARKETS.forEach((m, i) => { store.markets[m.code] = mk[i]; });
+  store.policy = await loadJSON("data/gp/policy.json").catch(() => ({ dates: [], series: {} }));
   Object.assign(store, { eurex, swaps, wirp, futures: futures.contracts });
   await start();
 } catch (err) {

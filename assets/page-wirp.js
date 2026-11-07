@@ -23,14 +23,15 @@ function probability(bp) {
   return part ? `${whole} ${dir}${whole > 1 ? "s" : ""} + ${part}% of another` : `${whole} ${dir}${whole > 1 ? "s" : ""}`;
 }
 
-try {
-  const [wirp, hist] = await Promise.all([loadJSON("data/wirp.json"), loadJSON("data/gp/wirp.json").catch(() => null)]);
-  start(wirp, hist);
-} catch (err) {
-  showError(app, err);
+
+// The policy rate series in data/gp/policy.json for each bank (the Fed: mid of the target range).
+const POLICY_SERIES = { Fed: "Fed funds target (mid)", ECB: "ECB deposit rate", BoE: "Bank Rate" };
+
+function decisionLabel(change) {
+  return change > 0 ? `Hike +${change}bp` : change < 0 ? `Cut −${-change}bp` : "Hold";
 }
 
-function start(wirp, hist) {
+function start(wirp, hist, policy) {
   const state = { bank: hashParam("b", "Fed", BANKS.map((b) => b.code)) };
   // Implied rate per meeting on an earlier snapshot, to show how pricing moved.
   const prevIndex = hist && hist.dates.length > 1 ? hist.dates.length - 2 : null;
@@ -83,6 +84,17 @@ function start(wirp, hist) {
         prevIndex != null ? el("td", {}, fmt.s(r.d1(r.prev), 1)) : null,
         weekIndex >= 0 && weekIndex !== prevIndex ? el("td", {}, fmt.s(r.d1(r.week), 1)) : null)))));
 
+    const past = b.decisions ?? [];
+    const decisions = el("div", { class: "table-wrap tall" }, el("table", {},
+      el("thead", {}, el("tr", {}, ["Meeting", "Decision", "Rate before %", "Rate after %", state.bank === "BoE" ? "MPC vote" : null, "Statement"]
+        .filter(Boolean).map((h, i) => el("th", { class: i === 0 || i === 1 || h === "Statement" ? "l" : "" }, h)))),
+      el("tbody", {}, past.map((d) => el("tr", {},
+        el("td", { class: "l" }, dayLabel(d.date)),
+        el("td", { class: `l ${d.change > 0 ? "neg" : d.change < 0 ? "pos" : ""}` }, decisionLabel(d.change)),
+        el("td", {}, d.before), el("td", {}, d.after),
+        state.bank === "BoE" ? el("td", {}, d.vote ?? "–") : null,
+        el("td", { class: "l" }, el("a", { href: d.link, target: "_blank", rel: "noopener" }, linkLabel(state.bank))))))));
+
     const pathChart = el("div", { class: "plot" });
     const cumChart = el("div", { class: "plot" });
     const fwdChart = el("div", { class: "plot" });
@@ -92,10 +104,14 @@ function start(wirp, hist) {
         tile(`${b.overnightName} fixing`, `${b.overnight.toFixed(3)}% (${b.fixingDate})`),
         tile(`${b.overnightName} priced to next meeting`, `${b.priced.toFixed(3)}%`),
         tile("Curve", `${b.curve} · Eurex Clearing`)),
-      el("section", { class: "panel" }, el("h2", {}, `${b.name}: implied policy rate and move priced at each meeting`), pathChart),
+      el("section", { class: "panel" }, el("h2", {}, `${b.name}: policy rate over two years and the path priced ahead`), pathChart),
       el("section", { class: "panel" }, el("h2", {}, "Meeting by meeting"), table,
         el("p", { class: "note" }, `Moves = bp ÷ ${STEP}. Probability reads a priced move as a share of one ${STEP}bp step, e.g. +20bp = 80% of a hike; `
           + "it ignores larger or opposite moves and any term premium in the OIS curve.")),
+      el("section", { class: "panel" }, el("h2", {}, `Decisions over the last two years (${past.filter((d) => d.change).length} moves in ${past.length} meetings)`),
+        past.length ? decisions : el("p", { class: "muted" }, "No decision history available."),
+        el("p", { class: "note" }, "Rates before and after from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate); links to each decision's statement."
+          + (state.bank === "BoE" ? " MPC vote: majority–minority, or unanimous." : ""))),
       el("div", { class: "grid cols-2" },
         el("section", { class: "panel" }, el("h2", {}, "Cumulative move priced: Fed, ECB, BoE"), cumChart),
         el("section", { class: "panel" }, el("h2", {}, "1-week forward overnight rate (OIS)"), fwdChart)));
@@ -103,8 +119,17 @@ function start(wirp, hist) {
     // Step path of the implied policy rate, with bars for the move priced at each meeting.
     const xs = [wirp.curveDate, ...rows.flatMap((r) => [r.effective, r.effective])];
     const ys = [b.policy, ...rows.flatMap((r, i) => [i ? rows[i - 1].implied : b.policy, r.implied])];
+    // Realised policy rate over two years, with each move marked, joined to the priced path.
+    const series = policy?.series[POLICY_SERIES[state.bank]];
+    const realised = series ? policy.dates.map((d, i) => [d, series[i]]).filter(([d, v]) => v != null && d <= wirp.curveDate) : [];
+    const moves = past.filter((d) => d.change);
     plot(pathChart, [
-      { x: rows.map((r) => r.date), y: rows.map((r) => r.change), type: "bar", name: "Δ at meeting (bp)", yaxis: "y2",
+      { x: realised.map((p) => p[0]), y: realised.map((p) => p[1]), mode: "lines", line: { color: "#bdbdbd", width: 1.6, shape: "hv" },
+        name: "Policy rate (realised)", hovertemplate: "%{x|%d %b %Y}: %{y:.3f}%<extra></extra>" },
+      { x: moves.map((d) => d.date), y: moves.map((d) => +d.after.split("–").at(-1) - (state.bank === "Fed" ? 0.125 : 0)), mode: "markers",
+        marker: { size: 9, symbol: moves.map((d) => (d.change > 0 ? "triangle-up" : "triangle-down")), color: moves.map((d) => (d.change > 0 ? "#ff5c5c" : "#3ddc84")) },
+        name: "Hike / cut", text: moves.map((d) => decisionLabel(d.change)), hovertemplate: "%{x|%d %b %Y}: %{text}<extra></extra>" },
+      { x: rows.map((r) => r.date), y: rows.map((r) => r.change), type: "bar", name: "Δ priced at meeting (bp)", yaxis: "y2",
         marker: { color: rows.map((r) => (r.change >= 0 ? "rgba(255,92,92,0.55)" : "rgba(61,220,132,0.55)")) },
         hovertemplate: "%{x|%d %b %Y}: %{y:+.1f}bp<extra></extra>" },
       { x: xs, y: ys, mode: "lines", line: { color: COLORS[0], width: 2 }, name: "Implied policy rate (%)",
@@ -125,6 +150,10 @@ function start(wirp, hist) {
     }), { yaxis: { title: { text: "%" }, tickformat: ".2f" } });
   }
   render();
+}
+
+function linkLabel(bank) {
+  return { Fed: "FOMC statement", ECB: "ECB press release", BoE: "MPC summary and minutes" }[bank];
 }
 
 function tile(k, v) {
@@ -148,5 +177,16 @@ function method(wirp) {
     el("li", {}, "Decisions take effect the day after the FOMC (Fed), the following Wednesday (ECB, start of the maintenance period) and the same day (BoE)."),
     el("li", {}, "Meeting dates: ", el("a", { href: b.Fed.calendar }, "Federal Reserve"), ", ", el("a", { href: b.ECB.calendar }, "ECB"), ", ",
       el("a", { href: b.BoE.calendar }, "Bank of England"), ". Rates: NY Fed (EFFR, target range), ECB Data Portal (deposit facility rate, €STR), Bank of England database (Bank Rate, SONIA)."),
-    el("li", {}, "OIS forwards include term premium and month- and year-end effects, so far meetings are less clean than near ones.")));
+    el("li", {}, "OIS forwards include term premium and month- and year-end effects, so far meetings are less clean than near ones."),
+    el("li", {}, "Decisions: FOMC statements (federalreserve.gov), ECB monetary policy press releases, Bank of England Monetary Policy Summary and minutes; "
+      + "rates before and after from the official rate series.")));
+}
+
+// Last, so that every constant above is initialised before the page starts.
+try {
+  const [wirp, hist, policy] = await Promise.all([loadJSON("data/wirp.json"), loadJSON("data/gp/wirp.json").catch(() => null),
+    loadJSON("data/gp/policy.json").catch(() => null)]);
+  start(wirp, hist, policy);
+} catch (err) {
+  showError(app, err);
 }
