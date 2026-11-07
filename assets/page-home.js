@@ -10,6 +10,7 @@ const BLURB = {
   FIHG: "Hedge a bond position by DV01 with futures or bonds, single or fly: lots or nominal per leg and the residual risk.",
   GP: "History of any bond's yield, price or asset swap spread, generic yields, swap rates, Eurex futures, basis and invoice spreads. Build spreads and flies, chart them and regress one on another.",
   WIRP: "Fed, ECB and BoE moves priced meeting by meeting by the OIS curves: implied policy rate, bp and probability of a 25bp move.",
+  IRS: "Price a USD or EUR swap: notional, fixed rate, spread, conventions and dates in, NPV out (or NPV in, rate out). Drag the swap curve to reprice.",
 };
 
 app.append(

@@ -12,6 +12,7 @@ pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 L
 | `FIHG.html` | DV01 hedge calculator with futures or bonds, single or fly |
 | `GP.html` | History of bond yields, prices and asset swap spreads, generic yields, swap rates, Eurex futures, gross basis, invoice spreads and WIRP pricing; formulas over the series (spreads, flies), line chart, scatter with OLS regression, rolling and matrix correlation |
 | `WIRP.html` | Fed, ECB and BoE moves priced meeting by meeting by the OIS curves |
+| `IRS.html` | USD and EUR swap pricer on the Eurex Clearing curves: NPV, par rate, PV01, DV01, cashflows; every field two-way, editable par swap curve |
 
 ## Data sources
 

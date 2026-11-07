@@ -9,6 +9,7 @@ export const PAGES = [
   { code: "FIHG", href: "FIHG.html", title: "Fixed Income Hedge" },
   { code: "GP", href: "GP.html", title: "Historical Graphs" },
   { code: "WIRP", href: "WIRP.html", title: "Policy Rate Pricing" },
+  { code: "IRS", href: "IRS.html", title: "Swap Pricer" },
 ];
 
 export const MARKETS = [
