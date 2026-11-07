@@ -57,13 +57,46 @@ export function frame(code) {
       el("span", { class: "code" }, p.code === "HOME" ? "<MENU>" : p.code), p.code === "HOME" ? "" : p.title)));
   document.body.prepend(top, tabs);
   const status = el("footer", { class: "status" }, "Loading data status…");
+  const codeNote = el("span");
   document.body.append(status);
   loadJSON("data/meta.json").then((meta) => {
     const failed = Object.entries(meta.steps).filter(([, s]) => !s.ok);
     status.replaceChildren(
       el("span", {}, `Data refreshed ${meta.refreshed} (weekdays at 10:00 London)`),
+      codeNote,
       ...failed.map(([name, s]) => el("span", { class: "bad", title: s.error }, `${name}: refresh failed, showing data from ${s.lastGood ?? "earlier"}`)));
-  }).catch(() => status.replaceChildren("Data status unavailable"));
+  }).catch(() => status.replaceChildren("Data status unavailable", codeNote));
+  codeUpdated().then((when) => { if (when) codeNote.textContent = `Code updated ${when}`; });
+}
+
+// "2026-11-07 10:41 GMT": London time, in the same form as the data refresh time.
+function londonTime(iso) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+    hourCycle: "h23", timeZoneName: "short",
+  }).formatToParts(new Date(iso)).map((p) => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} ${parts.timeZoneName}`;
+}
+
+// Time of the last commit to the page code (assets/) on main, from the GitHub API. Cached for an hour per
+// browser, as unauthenticated API calls are rate-limited; nothing is shown if the API cannot be reached.
+async function codeUpdated() {
+  if (["localhost", "127.0.0.1"].includes(location.hostname)) return "(local preview)";
+  try {
+    const hit = JSON.parse(localStorage.getItem("codeUpdated") ?? "null");
+    if (hit && Date.now() - hit.at < 36e5) return londonTime(hit.iso);
+  } catch { /* storage unavailable */ }
+  try {
+    const r = await fetch("https://api.github.com/repos/kouandco/kouandco.github.io/commits?sha=main&path=assets&per_page=1");
+    if (!r.ok) return null;
+    const [c] = await r.json();
+    if (!c) return null;
+    const iso = c.commit.committer.date;
+    try { localStorage.setItem("codeUpdated", JSON.stringify({ at: Date.now(), iso })); } catch { /* storage unavailable */ }
+    return londonTime(iso);
+  } catch {
+    return null;
+  }
 }
 
 // Market / contract selector buttons bound to the URL hash, e.g. #DE or #RX.
