@@ -1,7 +1,7 @@
 import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, heat, loadJSON, plot, segmented, setHash, showError, signClass } from "./common.js";
 import { nsEval, parseDate, pricer, repoAt, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
-import { FUTURES_BY_MARKET, contractSummary, hedgeWeights } from "./futures.js";
+import { FUTURES_BY_MARKET, anchorMarket, contractSummary, hedgeWeights } from "./futures.js";
 
 frame("BMNT");
 const app = $("#app");
@@ -191,10 +191,11 @@ function start(contracts, auctions, markets) {
       return { ...b, t, roll, extrap, gc, special, repo, carry: ((b.yield - repo) / 4) * 100, dirty: b.price + accrued, fitted: nsEval(fit, t) };
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
-    // Each contract's CTD is financed at the curve's term repo to its delivery (the delivery point for the main contract).
-    const repoMarket = { ...market, repo: { ...market.repo, points: bx.points } };
+    // The futures legs are the CTD page's: the curve anchored to futures and EFP basis, CTD financed at the
+    // repo proxy, so the net basis here is the CTD page's net basis (anchored gross basis − carry).
+    const anchored = anchorMarket(market, contracts);
     const legs = FUTURES_BY_MARKET[mcode].map((code) => {
-      const s = contractSummary(code, contracts[code], repoMarket);
+      const s = contractSummary(code, contracts[code], anchored);
       if (!s) return null;
       const row = byId.get(s.ctd.id);
       return row ? { ...s, t: row.t, row } : null;
@@ -342,19 +343,19 @@ function start(contracts, auctions, markets) {
   }
 
   function renderHedge(legs) {
-    const market = markets[mcode];
     hedgeHost.replaceChildren(el("div", { class: "table-wrap" }, el("table", {},
       el("thead", {}, el("tr", {}, ["Contract", "Expiry", "CTD", "CTD tenor", "Futures", "Source", "Net basis (ct)", "Fair net basis (ct)", "CTD prob", "DV01 / contract"]
         .map((h, i) => el("th", { class: i < 3 ? "l" : "" }, h)))),
       el("tbody", {}, legs.map((l) => el("tr", {},
         el("td", { class: "l" }, `${l.code} ${l.contract.name}`), el("td", { class: "l" }, l.contract.expiry), el("td", { class: "l" }, l.ctd.name),
         el("td", {}, l.t.toFixed(2)), el("td", {}, l.futures.toFixed(3)),
-        el("td", {}, l.futuresSource === "market" ? `EFP VWAP ${market.asOf}` : "model fair value"),
+        el("td", {}, l.futuresSource === "market" ? `EFP VWAP ${l.futuresDate}` : "model fair value"),
         el("td", {}, fmt.n(l.netBasis * 100, 1)), el("td", {}, fmt.n(l.fairNetBasis * 100, 1)),
         el("td", {}, fmt.pct(l.prob, 0)), el("td", {}, fmt.n(l.dv01, 0))))))),
     el("p", { class: "note" }, mcode === "UST"
       ? "No free Treasury futures prices, so UST net basis is the model's fair value (the delivery option); see the CTD page."
-      : `Market net basis uses the daily VWAP of the futures leg of EFP trades on ${market.asOf}; contracts without EFPs that day use the model's fair value.`));
+      : "Net basis as on the CTD page: the bond curve anchored to the futures VWAP and each deliverable's EFP gross basis VWAP, "
+        + "net basis = gross basis − carry at the repo proxy. Contracts without EFPs use the model's fair value."));
   }
 
   function renderChart(rows, legs) {

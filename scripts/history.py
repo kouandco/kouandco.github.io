@@ -2,7 +2,8 @@
 (data/eurex_trades.json) and the archived conversion factors (data/history/eurex_cf.csv).
 
 - Futures: daily VWAP of the futures leg of all EFP and EFS trades, per contract and expiry.
-- Gross basis: daily VWAP of cash − futures × CF over EFP trades, per deliverable bond, in cents.
+- Gross basis: daily VWAP of cash − futures × CF over EFP trades, per deliverable bond, in cents, with the
+  EURX page's outlier rules (futures.daily_basis).
 - Invoice spread: daily VWAP of swap rate − futures-implied yield over EFS trades whose swap runs from
   delivery to (within 45 days of) a deliverable's maturity, in bp. Matched EFS print in two clusters
   (most likely €STR OIS and 6m Euribor swaps; the file does not say which), split as on the EURX page.
@@ -18,6 +19,7 @@ import numpy as np
 import pandas as pd
 
 from common import DATA, parse_date, write_json, yield_from_price
+from futures import daily_basis
 
 FREQ = {"DU": 1, "OE": 1, "RX": 1, "UB": 1, "OAT": 1, "BTS": 2, "IK": 2}
 
@@ -57,12 +59,11 @@ def build():
     for (c, x), g in fut.groupby(["c", "x"]):
         series[f"FUT|{c}|{x}"] = vwap(g, "f")
 
-    efp = efp[[(r.c, r.x, r.isin) in cf for r in efp.itertuples()]].copy()
-    efp["basis"] = [(r.cash - r.f * cf[(r.c, r.x, r.isin)].cf) * 100 for r in efp.itertuples()]
+    efp = efp[[(r.c, r.x, r.isin) in cf for r in efp.itertuples()]]
     for (c, x, isin), g in efp.groupby(["c", "x", "isin"]):
-        g = g[keep(g.basis, 25)]
-        if len(g):
-            series[f"BASIS|{c}|{x}|{isin}"] = vwap(g, "basis").round(2)
+        daily = daily_basis(g.to_dict("records"), cf[(c, x, isin)].cf)
+        if daily:
+            series[f"BASIS|{c}|{x}|{isin}"] = pd.Series({d: v for d, (v, _) in daily.items()})
 
     baskets = defaultdict(list)
     for (c, x, isin), r in cf.items():

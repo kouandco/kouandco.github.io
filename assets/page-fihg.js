@@ -1,6 +1,6 @@
 import { $, MARKETS, el, fmt, frame, hashParam, loadJSON, segmented, setHash, showError } from "./common.js";
 import { parseDate, pricer, yearsBetween } from "./bond.js";
-import { FUTURES_BY_MARKET, contractSummary, hedgeWeights } from "./futures.js";
+import { FUTURES_BY_MARKET, anchorMarket, contractSummary, hedgeWeights } from "./futures.js";
 
 frame("FIHG");
 const app = $("#app");
@@ -36,7 +36,7 @@ function start(contracts, markets) {
   }
   const futs = {};
   for (const [code, c] of Object.entries(contracts)) {
-    const s = contractSummary(code, c, markets[c.market]);
+    const s = contractSummary(code, c, anchorMarket(markets[c.market], contracts));
     if (s) futs[code] = { ...s, t: s.ctd.t, market: c.market };
   }
   const futLabel = (k) => `${k} ${contracts[k].expiry} · CTD ${futs[k].ctd.name}`;

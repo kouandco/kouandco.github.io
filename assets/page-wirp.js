@@ -68,32 +68,47 @@ function start(wirp, hist, policy) {
       prev: earlier(state.bank, m.date, prevIndex),
       week: earlier(state.bank, m.date, weekIndex),
     }));
-    const head = ["Meeting", "Effective", "Implied rate %", "Δ at meeting bp", "Moves", "Probability", "Cumulative bp", "Cumulative moves",
-      prevIndex != null ? `Δ vs ${hist.dates[prevIndex]} bp` : null, weekIndex >= 0 && weekIndex !== prevIndex ? "Δ 1w bp" : null].filter(Boolean);
-    const table = el("div", { class: "table-wrap" }, el("table", {},
-      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: i < 2 ? "l" : "" }, h)))),
-      el("tbody", {}, rows.map((r) => el("tr", {},
-        el("td", { class: "l" }, dayLabel(r.date)),
-        el("td", { class: "l muted" }, dayLabel(r.effective)),
-        el("td", {}, r.implied.toFixed(3)),
-        el("td", { class: r.change > 0.5 ? "neg" : r.change < -0.5 ? "pos" : "" }, fmt.s(r.change, 1)),
-        el("td", {}, fmt.s(r.change / STEP, 2)),
-        el("td", { class: "l" }, probability(r.change)),
-        el("td", {}, fmt.s(r.cumulative, 1)),
-        el("td", {}, fmt.s(r.cumulative / STEP, 2)),
-        prevIndex != null ? el("td", {}, fmt.s(r.d1(r.prev), 1)) : null,
-        weekIndex >= 0 && weekIndex !== prevIndex ? el("td", {}, fmt.s(r.d1(r.week), 1)) : null)))));
-
-    const past = b.decisions ?? [];
-    const decisions = el("div", { class: "table-wrap tall" }, el("table", {},
-      el("thead", {}, el("tr", {}, ["Meeting", "Decision", "Rate before %", "Rate after %", state.bank === "BoE" ? "MPC vote" : null, "Statement"]
-        .filter(Boolean).map((h, i) => el("th", { class: i === 0 || i === 1 || h === "Statement" ? "l" : "" }, h)))),
-      el("tbody", {}, past.map((d) => el("tr", {},
-        el("td", { class: "l" }, dayLabel(d.date)),
-        el("td", { class: `l ${d.change > 0 ? "neg" : d.change < 0 ? "pos" : ""}` }, decisionLabel(d.change)),
-        el("td", {}, d.before), el("td", {}, d.after),
-        state.bank === "BoE" ? el("td", {}, d.vote ?? "–") : null,
-        el("td", { class: "l" }, el("a", { href: d.link, target: "_blank", rel: "noopener" }, linkLabel(state.bank))))))));
+    // One table, oldest first: decisions taken over two years, a marker for today, then the moves priced ahead.
+    const past = [...(b.decisions ?? [])].sort((x, y) => (x.date < y.date ? -1 : 1));
+    const showPrev = prevIndex != null, showWeek = weekIndex >= 0 && weekIndex !== prevIndex;
+    const boe = state.bank === "BoE";
+    const head = ["Meeting", "Effective", "Status", "Rate after / implied %", "Move bp", "Moves", "Outcome / probability", "Cumulative from today bp",
+      showPrev ? `Δ vs ${hist.dates[prevIndex]} bp` : null, showWeek ? "Δ 1w bp" : null, boe ? "MPC vote" : null, "Statement"].filter(Boolean);
+    const moveCls = (bp) => (bp > 0.5 ? "neg" : bp < -0.5 ? "pos" : "");
+    const pad = (n) => Array.from({ length: n }, () => el("td", {}, ""));
+    const todayRow = el("tr", { class: "hl" }, el("td", { class: "l amber", colspan: head.length },
+      `Today (curves of ${dayLabel(wirp.curveDate)}): ${b.policyLabel}`));
+    const table = el("div", { class: "table-wrap tall" }, el("table", {},
+      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: [0, 1, 2, 6].includes(i) || h === "Statement" ? "l" : "" }, h)))),
+      el("tbody", {},
+        past.map((d) => el("tr", {},
+          el("td", { class: "l" }, dayLabel(d.date)),
+          el("td", { class: "l muted" }, ""),
+          el("td", { class: "l muted" }, "Decided"),
+          el("td", {}, d.after),
+          el("td", { class: moveCls(d.change) }, fmt.s(d.change, 0)),
+          el("td", {}, fmt.s(d.change / STEP, 2)),
+          el("td", { class: `l ${moveCls(d.change)}` }, decisionLabel(d.change)),
+          el("td", {}, ""),
+          ...pad(showPrev + showWeek),
+          boe ? el("td", {}, d.vote ?? "–") : null,
+          el("td", { class: "l" }, el("a", { href: d.link, target: "_blank", rel: "noopener" }, linkLabel(state.bank))))),
+        todayRow,
+        rows.map((r) => el("tr", { class: "upcoming" },
+          el("td", { class: "l" }, dayLabel(r.date)),
+          el("td", { class: "l muted" }, dayLabel(r.effective)),
+          el("td", { class: "l" }, "Priced"),
+          el("td", {}, r.implied.toFixed(3)),
+          el("td", { class: moveCls(r.change) }, fmt.s(r.change, 1)),
+          el("td", {}, fmt.s(r.change / STEP, 2)),
+          el("td", { class: "l" }, probability(r.change)),
+          el("td", {}, fmt.s(r.cumulative, 1)),
+          showPrev ? el("td", {}, fmt.s(r.d1(r.prev), 1)) : null,
+          showWeek ? el("td", {}, fmt.s(r.d1(r.week), 1)) : null,
+          boe ? el("td", {}, "") : null,
+          el("td", { class: "l" }, ""))))));
+    // Open the table with today near the top: the priced meetings in view, past decisions a scroll up.
+    requestAnimationFrame(() => { table.scrollTop = Math.max(0, todayRow.offsetTop - 120); });
 
     const pathChart = el("div", { class: "plot" });
     const cumChart = el("div", { class: "plot" });
@@ -105,13 +120,12 @@ function start(wirp, hist, policy) {
         tile(`${b.overnightName} priced to next meeting`, `${b.priced.toFixed(3)}%`),
         tile("Curve", `${b.curve} · Eurex Clearing`)),
       el("section", { class: "panel" }, el("h2", {}, `${b.name}: policy rate over two years and the path priced ahead`), pathChart),
-      el("section", { class: "panel" }, el("h2", {}, "Meeting by meeting"), table,
-        el("p", { class: "note" }, `Moves = bp ÷ ${STEP}. Probability reads a priced move as a share of one ${STEP}bp step, e.g. +20bp = 80% of a hike; `
-          + "it ignores larger or opposite moves and any term premium in the OIS curve.")),
-      el("section", { class: "panel" }, el("h2", {}, `Decisions over the last two years (${past.filter((d) => d.change).length} moves in ${past.length} meetings)`),
-        past.length ? decisions : el("p", { class: "muted" }, "No decision history available."),
-        el("p", { class: "note" }, "Rates before and after from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate); links to each decision's statement."
-          + (state.bank === "BoE" ? " MPC vote: majority–minority, or unanimous." : ""))),
+      el("section", { class: "panel" },
+        el("h2", {}, `Meeting by meeting: ${past.filter((d) => d.change).length} moves in the last ${past.length} meetings, then the path priced ahead`), table,
+        el("p", { class: "note" }, "Decided: rate after the decision from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate), "
+          + `with a link to the statement${boe ? "; MPC vote majority–minority, or unanimous" : ""}. `
+          + `Priced: implied rate from the OIS curve. Moves = bp ÷ ${STEP}. Probability reads a priced move as a share of one ${STEP}bp step, `
+          + "e.g. +20bp = 80% of a hike; it ignores larger or opposite moves and any term premium in the OIS curve.")),
       el("div", { class: "grid cols-2" },
         el("section", { class: "panel" }, el("h2", {}, "Cumulative move priced: Fed, ECB, BoE"), cumChart),
         el("section", { class: "panel" }, el("h2", {}, "1-week forward overnight rate (OIS)"), fwdChart)));

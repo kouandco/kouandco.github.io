@@ -190,14 +190,77 @@ export function hedgeWeights(t, legs) {
   return w;
 }
 
-// Market futures price on the date of the bond prices (daily VWAP of EFP futures legs), if any.
+// Market futures price (daily VWAP of EFP futures legs): on the market's anchor date if the curve is anchored,
+// otherwise on the date of the bond prices.
 export function marketFutures(contract, market) {
-  const price = contract.futures?.vwap?.[market.asOf];
-  return price == null ? null : { price, date: market.asOf, lots: contract.futures.lots[market.asOf] };
+  const date = market.anchor?.dates[contract.product] ?? market.asOf;
+  const price = contract.futures?.vwap?.[date];
+  return price == null ? null : { price, date, lots: contract.futures.lots[date] };
+}
+
+// ---------------------------------------------------------------- curve anchor
+
+// Anchor a market's bond curve to the futures: for every deliverable with EFP trades on the contract's latest
+// futures date, clean price = futures VWAP × CF + gross basis VWAP (as on the EURX page), and the yield that
+// price implies at the market's settlement. Those bonds take their implied yield exactly; every other bond, and
+// the generic curve points, move by the shift interpolated across the contracts (each contract one point: the
+// lot-weighted shift at the lot-weighted maturity of its traded bonds; flat beyond the first and last).
+export function curveAnchor(contracts, market) {
+  const settle = parseDate(market.settle);
+  const byId = new Map(market.bonds.map((b) => [b.id, b]));
+  const points = [], perContract = [], dates = {};
+  for (const [code, c] of Object.entries(contracts)) {
+    if (c.market !== market.market || !c.futures?.vwap || !c.basis) continue;
+    const date = Object.keys(c.futures.vwap).sort().reverse().find((d) => c.basket.some((b) => c.basis[b.id]?.[d]));
+    if (!date) continue;
+    const fut = c.futures.vwap[date];
+    const pts = [];
+    for (const d of c.basket) {
+      const q = c.basis[d.id]?.[date];
+      const mb = byId.get(d.id);
+      if (!q || !mb) continue;
+      const maturity = parseDate(d.maturity);
+      const clean = fut * d.cf + q.c / 100;
+      const implied = yieldFromPrice(pricer(d.coupon, maturity, settle, market.freq).price, clean);
+      pts.push({ id: d.id, name: mb.name, contract: code, date, futures: fut, cf: d.cf, basis: q.c, lots: q.lots,
+        t: yearsBetween(settle, maturity), close: mb.yield, implied, shift: implied - mb.yield });
+    }
+    if (!pts.length) continue;
+    dates[c.product] = date;
+    points.push(...pts);
+    const lots = pts.reduce((a, p) => a + p.lots, 0);
+    perContract.push({ contract: code, date, t: pts.reduce((a, p) => a + p.t * p.lots, 0) / lots,
+      shift: pts.reduce((a, p) => a + p.shift * p.lots, 0) / lots, lots });
+  }
+  if (!points.length) return null;
+  perContract.sort((a, b) => a.t - b.t);
+  const shift = linear(perContract.map((p) => p.t), perContract.map((p) => p.shift));
+  const own = new Map();
+  for (const p of points) (own.get(p.id) ?? own.set(p.id, []).get(p.id)).push(p);
+  // A bond traded against two contracts takes the lot-weighted average of its implied shifts.
+  const exact = new Map([...own].map(([id, ps]) => {
+    const lots = ps.reduce((a, p) => a + p.lots, 0);
+    return [id, ps.reduce((a, p) => a + p.shift * p.lots, 0) / lots];
+  }));
+  return { points, perContract, dates, shift, bondShift: (id, t) => exact.get(id) ?? shift(t) };
+}
+
+// The market with its bond yields and generic curve points moved onto the futures anchor (closing yields kept
+// as `closeYield`). Markets without Eurex futures data come back unchanged.
+export function anchorMarket(market, contracts) {
+  const anchor = curveAnchor(contracts, market);
+  if (!anchor) return { ...market, anchor: null };
+  const settle = parseDate(market.settle);
+  return {
+    ...market, anchor,
+    bonds: market.bonds.map((b) => ({ ...b, closeYield: b.yield, yield: b.yield + anchor.bondShift(b.id, yearsBetween(settle, parseDate(b.maturity))) })),
+    nodes: market.nodes.map((n) => ({ ...n, closeYield: n.yield, yield: n.yield + anchor.shift(n.t) })),
+  };
 }
 
 // Front-contract summary used by the monitor and hedge pages: CTD, DV01 and net basis
-// (market if a futures price exists, else the model's fair value).
+// (market if a futures price exists, else the model's fair value). Pass the anchored market
+// (anchorMarket) so that the net basis is the CTD page's: anchored gross basis − carry.
 export function contractSummary(code, contract, market, opts = {}) {
   const model = prepare(contract, market, opts);
   if (!model.bonds.length) return null;
@@ -209,7 +272,7 @@ export function contractSummary(code, contract, market, opts = {}) {
   const fut = mkt?.price ?? res.fair;
   return {
     code, contract, model, ctd, prob: res.prob[i],
-    futures: fut, futuresSource: mkt ? "market" : "model",
+    futures: fut, futuresSource: mkt ? "market" : "model", futuresDate: mkt?.date,
     netBasis: ctd.fwdClean - fut * ctd.cf,
     fairNetBasis: res.nbFair[i],
     dv01: futuresDV01(ctd, contract.face),

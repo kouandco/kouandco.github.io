@@ -1,14 +1,15 @@
-import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
+import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError, signClass } from "./common.js";
 import { Phi, linear, parseDate, phi, pricer, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
-import { FUTURES_BY_MARKET, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, sweep, yieldForRatio } from "./futures.js";
+import { FUTURES_BY_MARKET, anchorMarket, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, sweep, yieldForRatio } from "./futures.js";
 
 frame("CTD");
 const app = $("#app");
 
 try {
   const [futures, ...list] = await Promise.all([loadJSON("data/futures.json"), ...MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))]);
-  start(futures.contracts, Object.fromEntries(MARKETS.map((m, i) => [m.code, list[i]])));
+  // Bond curves anchored to the futures and EFP gross basis (closing yields kept as closeYield).
+  start(futures.contracts, Object.fromEntries(MARKETS.map((m, i) => [m.code, anchorMarket(list[i], futures.contracts)])));
 } catch (err) {
   showError(app, err);
 }
@@ -78,6 +79,7 @@ function start(contracts, markets) {
   const switchesHost = el("div", { class: "note" });
   const basketHost = el("div");
   const basketNote = el("p", { class: "note" });
+  const anchorHost = el("div");
   const addHost = el("div", { class: "stack", style: { marginTop: "8px" } });
   const sweepProb = el("div", { class: "plot" });
   const sweepDV01 = el("div", { class: "plot" });
@@ -103,7 +105,7 @@ function start(contracts, markets) {
       el("div", { class: "row", style: { justifyContent: "space-between" } },
         el("h2", {}, "Deliverable basket"),
         el("button", { class: "btn", onclick: () => { inputs[ccode] = {}; added[ccode] = []; renderAddForm(); recompute(); } }, "Reset bonds")),
-      basketHost, addHost, basketNote),
+      basketHost, addHost, basketNote, anchorHost),
     methodNote());
 
   const editor = curveEditor({
@@ -214,6 +216,8 @@ function start(contracts, markets) {
         mkt ? `EFP VWAP ${mkt.date}, ${fmt.int(mkt.lots)} lots` : mcode === "UST" ? "no free CME source" : `no EFPs on ${market.asOf}`),
       tile("Futures (fair)", priceText(mcode, res.fair), "E[min P/CF] at delivery"),
       tile("Market − fair", richCheap == null ? "–" : `${fmt.s(richCheap, 1)}${unit.label}`, richCheap == null ? "" : richCheap > 0 ? "futures rich" : "futures cheap"),
+      tile("Curve anchor", market.anchor ? `${fmt.s(market.anchor.bondShift(ctd.id, ctd.t) * 100, 1)}bp at the CTD` : "none",
+        market.anchor ? `futures + EFP basis VWAP, ${market.anchor.points.length} bonds; closing yields ${market.asOf}` : mcode === "UST" ? "no free CME futures prices: closing yields" : "no EFPs: closing yields"),
       tile("CTD today", ctd.name, `probability ${fmt.pct(res.prob[i0], 0)}`),
       tile("OA DV01", fmt.n(dv * contract.face / 100, 0), `per contract (${fmt.n(dv, 4)} per 100); CTD β × DV01 / CF ${fmt.n((ctd.beta * ctd.dv01 / ctd.cf) * contract.face / 100, 0)}`),
     );
@@ -319,7 +323,10 @@ function start(contracts, markets) {
       : ""), left: true },
     { key: "name", label: "Bond", fmt: (r) => `${r.isCtd ? "◆ " : ""}${r.name}${r.added ? " (added)" : ""}`, value: (r) => r.t, left: true },
     { key: "mat", label: "Maturity", fmt: (r) => r.maturity, value: (r) => r.t },
-    { key: "y", label: "Yield", unit: "%", edit: { get: (r) => r.y.toFixed(4), set: (r, v) => setInput(r.id, { y: clampYield(v, r.y) - r.shift }), changed: (r) => inputs[ccode]?.[r.id]?.y != null } },
+    { key: "close", label: "Close yield", unit: "%", fmt: (r) => (r.closeYield == null ? "–" : r.closeYield.toFixed(3)), value: (r) => r.closeYield,
+      title: "Closing yield before the futures anchor" },
+    { key: "y", label: "Yield", unit: "%", title: "Anchored to the futures and EFP basis; edit to override",
+      edit: { get: (r) => r.y.toFixed(4), set: (r, v) => setInput(r.id, { y: clampYield(v, r.y) - r.shift }), changed: (r) => inputs[ccode]?.[r.id]?.y != null } },
     { key: "beta", label: "Beta", edit: { get: (r) => r.beta.toFixed(2), set: (r, v) => setInput(r.id, { beta: +v }), changed: (r) => inputs[ccode]?.[r.id]?.beta != null } },
     { key: "cf", label: "CF", edit: { get: (r) => r.cf.toFixed(4), set: (r, v) => setInput(r.id, { cf: +v }), changed: (r) => inputs[ccode]?.[r.id]?.cf != null } },
     { key: "fy", label: "Fwd yield", unit: "%", fmt: (r) => r.fwdYield.toFixed(3), value: (r) => r.fwdYield },
@@ -327,9 +334,12 @@ function start(contracts, markets) {
       const y = yieldForRatio(last.model, markets[mcode], r.id, +v);
       setInput(r.id, { y: y - r.shift });
     } } },
+    { key: "efp", label: "EFP basis VWAP", get unit() { return basisUnit(mcode).label; }, fmt: (r) => (r.efp == null ? "–" : fmt.n(r.efp, 1)), value: (r) => r.efp,
+      title: "Daily VWAP gross basis of the bond's EFP trades (EURX page), the anchor" },
     { key: "gross", label: "Gross basis", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.gross, 1), value: (r) => r.gross },
     { key: "carry", label: "Carry", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.carryT, 1), value: (r) => r.carryT },
-    { key: "nbm", label: "Net basis mkt", get unit() { return basisUnit(mcode).label; }, fmt: (r) => (r.nbMkt == null ? "–" : fmt.n(r.nbMkt, 1)), value: (r) => r.nbMkt },
+    { key: "nbm", label: "Net basis", get unit() { return basisUnit(mcode).label; }, fmt: (r) => (r.nbMkt == null ? "–" : fmt.n(r.nbMkt, 1)), value: (r) => r.nbMkt,
+      title: "Gross basis − carry: the output" },
     { key: "nbf", label: "Net basis fair", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.nbFair, 1), value: (r) => r.nbFair },
     { key: "p", label: "CTD prob", unit: "%", fmt: (r) => fmt.n(100 * r.prob, 1), value: (r) => r.prob, cls: (r) => (r.prob > 0.5 ? "pos" : "") },
     { key: "dv01", label: "DV01", unit: "/100", fmt: (r) => r.dv01.toFixed(4), value: (r) => r.dv01 },
@@ -342,15 +352,42 @@ function start(contracts, markets) {
     const c = ctdIndex(model);
     basketTable.node.classList.toggle("tall", model.bonds.length > 15);
     const extra = new Set((added[ccode] ?? []).map((a) => a.id));
+    const market = markets[mcode];
+    const close = new Map(market.bonds.map((b) => [b.id, b.closeYield ?? b.yield]));
+    const contract = contracts[ccode];
+    const efpDate = market.anchor?.dates[contract.product];
     basketTable.update(model.bonds.map((b, i) => ({
-      ...b, isCtd: i === c, prob: res.prob[i], shift: shift(b.t), added: extra.has(b.id),
+      ...b, isCtd: i === c, prob: res.prob[i], shift: shift(b.t), added: extra.has(b.id), closeYield: close.get(b.id),
+      efp: efpDate && contract.basis?.[b.id]?.[efpDate] ? contract.basis[b.id][efpDate].c * unit.mult / 100 : null,
       gross: (b.clean - fut * b.cf) * unit.mult, carryT: b.carry * unit.mult,
       nbFair: res.nbFair[i] * unit.mult, nbMkt: mkt ? (b.fwdClean - mkt.price * b.cf) * unit.mult : null,
     })));
-    basketNote.textContent = `Yields as of ${markets[mcode].asOf} (end-of-day prices). ` +
+    basketNote.textContent = (market.anchor
+      ? `Yields anchored to the futures: bonds with EFP trades on ${efpDate} take the yield of futures VWAP × CF + their EFP gross basis VWAP, `
+        + `so their gross basis is the EURX VWAP; other bonds move with the shift interpolated across contracts (closing yields of ${market.asOf} in Close yield). `
+      : `Yields as of ${market.asOf} (end-of-day prices). `) +
       `Gross basis = clean price − futures × CF using ${mkt ? "the market" : "the model's fair"} futures price; carry = clean − forward clean ` +
-      `price at delivery (repo ${model.repo.toFixed(3)}%); net basis = gross − carry. Fair net basis uses the fair futures price. ` +
+      `price at delivery (repo ${model.repo.toFixed(3)}%); net basis = gross − carry, the output. Fair net basis uses the fair futures price. ` +
       `◆ = CTD at forward prices. Edited inputs are highlighted; P/CF edits solve for the yield.`;
+    renderAnchor(market, unit);
+  }
+
+  // The anchor points behind the curve shift for this market.
+  function renderAnchor(market, unit) {
+    const a = market.anchor;
+    if (!a) { anchorHost.replaceChildren(); return; }
+    anchorHost.replaceChildren(el("section", { class: "panel", style: { marginTop: "10px" } },
+      el("h2", {}, `Curve anchor: ${market.name} moved onto the futures`),
+      el("div", { class: "table-wrap" }, el("table", {},
+        el("thead", {}, el("tr", {}, ["Bond", "Contract", "Date", "Futures VWAP", "CF", `EFP basis ${unit.label}`, "Lots", "Implied yield %", "Close yield %", "Shift bp"]
+          .map((h, i) => el("th", { class: i < 3 ? "l" : "" }, h)))),
+        el("tbody", {}, [...a.points].sort((x, y) => x.t - y.t).map((p) => el("tr", {},
+          el("td", { class: "l" }, p.name), el("td", { class: "l" }, p.contract), el("td", { class: "l" }, p.date),
+          el("td", {}, p.futures.toFixed(3)), el("td", {}, p.cf.toFixed(6)), el("td", {}, fmt.n(p.basis * unit.mult / 100, 1)),
+          el("td", {}, fmt.int(p.lots)), el("td", {}, p.implied.toFixed(4)), el("td", {}, p.close.toFixed(4)),
+          el("td", { class: signClass(p.shift * 100, 0.5) }, fmt.s(p.shift * 100, 1))))))),
+      el("p", { class: "note" }, "Implied yield: the yield at the market's settlement of clean price = futures VWAP × CF + EFP gross basis VWAP. "
+        + `Interpolation points (lot-weighted per contract): ${a.perContract.map((p) => `${p.contract} ${p.t.toFixed(1)}y ${fmt.s(p.shift * 100, 1)}bp`).join(", ")}; flat beyond.`)));
   }
 
   // ---- adding bonds to the basket
@@ -470,6 +507,9 @@ function methodNote() {
       el("li", {}, "The futures delivers the lowest price / conversion factor. The points on the z line where the cheapest bond changes are solved exactly, so CTD probabilities are differences of normal CDFs; the fair futures price is the expected lower envelope (Simpson's rule over ±5 standard deviations). Nothing is simulated."),
       el("li", {}, "Bonds can be added to the basket, from the market or by hand (e.g. a new issue). Their conversion factor is computed with the CME formula (UST) or as Eurex does (price per 1 nominal at the 6% notional coupon, 4% for the Buxl, on the delivery date) unless typed in. Check eligibility against the exchange's rules."),
       el("li", {}, "Moving a curve point shifts today's yields of the deliverables by the interpolated change at their maturity; the forward yields then follow from repo. Drift is your expected yield change per year to delivery; vol is the normal (bp) volatility per year, defaulting to the realised 3-month volatility of that curve point."),
-      el("li", {}, "Bond yields: TreasuryDirect (UST), Bundesbank (Bunds), Borsa Italiana closing prices (OATs, BTPs). Conversion factors: CME formula (UST), Eurex notified factors. Market futures prices: daily VWAP of the futures leg of Eurex EFP trades on the date of the bond prices; none for UST (CME data cannot be republished), so the UST tiles show the model only."),
+      el("li", {}, "Bond yields: TreasuryDirect (UST), Bundesbank (Bunds), Borsa Italiana closing prices (OATs, BTPs). Conversion factors: CME formula (UST), Eurex notified factors. Market futures prices: daily VWAP of the futures leg of Eurex EFP trades; none for UST (CME data cannot be republished), so the UST tiles show the model only."),
+      el("li", {}, "Curve anchor (Eurex markets): on each contract's latest EFP day, a deliverable's clean price = futures VWAP × CF + its EFP gross basis VWAP (as on the EURX page). "
+        + "Those bonds take the implied yield; other bonds and the generic curve points move by the lot-weighted shift of each contract, interpolated by maturity and flat beyond. "
+        + "Gross basis is then the EURX VWAP for traded bonds, and net basis = gross basis − carry is the output. The Bond Monitor uses the same net basis."),
       el("li", {}, "Beta: regression of each bond's daily yield change on the fitted curve's change at its maturity over 3 months (clipped to 0.5–1.5).")));
 }

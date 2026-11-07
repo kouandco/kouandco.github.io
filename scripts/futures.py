@@ -7,6 +7,8 @@ conversion factors, and a futures price where a free source exists.
 - Futures prices: Eurex, the daily volume-weighted futures price of EFP trades over the last
   ten trading days (data/eurex_trades.json). UST: none (CME data cannot be scraped); the pages use the
   model's fair futures price instead.
+- Gross basis: Eurex, each deliverable's daily VWAP gross basis from EFP trades (as on the EURX page),
+  which the CTD page uses with the futures price to anchor the bond curve.
 
 The front contract rolls automatically: UST before the delivery month starts (first
 position day), Eurex two business days before the delivery day.
@@ -15,8 +17,10 @@ position day), Eurex two business days before the delivery day.
 import io
 import json
 import re
+from collections import defaultdict
 from datetime import date, timedelta
 
+import numpy as np
 import pandas as pd
 from pandas.tseries.holiday import USFederalHolidayCalendar
 
@@ -122,6 +126,30 @@ def build_ust(today):
     return out
 
 
+def daily_basis(trades, cf):
+    """Daily VWAP gross basis (cash − futures × CF, in cents) of one bond's EFP trades, with the EURX page's
+    outlier rules: first drop prints more than max(25c, 8 MAD) from the series median, then prints more
+    than max(2c, 8 × the median deviation) from their day's median. Returns {day: (vwap cents, lots)}."""
+    rows = [(t["t"][:10], (t["cash"] - t["f"] * cf) * 100, t["q"]) for t in trades]
+    if not rows:
+        return {}
+    v = np.array([r[1] for r in rows])
+    med = np.median(v)
+    rows = [r for r in rows if abs(r[1] - med) <= max(25, 8 * np.median(np.abs(v - med)))]
+    by_day = defaultdict(list)
+    for d, x, _ in rows:
+        by_day[d].append(x)
+    day_med = {d: np.median(xs) for d, xs in by_day.items()}
+    dev = [abs(x - day_med[d]) for d, x, _ in rows]
+    limit = max(2, 8 * (np.median(dev) if dev else 0))
+    out = defaultdict(lambda: [0.0, 0])
+    for (d, x, q), e in zip(rows, dev):
+        if e <= limit:
+            out[d][0] += x * q
+            out[d][1] += q
+    return {d: (round(pq / q, 2), q) for d, (pq, q) in sorted(out.items()) if q}
+
+
 def archive_cfs(df):
     """Keep every notified conversion factor in data/history/eurex_cf.csv: Eurex lists only current and
     future deliveries, and the GP page's basis history needs the factors of expired contracts too."""
@@ -173,9 +201,16 @@ def build_eurex(today):
         days = sorted(vwap)[-10:]
         futures = {"vwap": {d: round(vwap[d][0] / vwap[d][1], 4) for d in days},
                    "lots": {d: vwap[d][1] for d in days}} if days else None
+        # Daily VWAP gross basis of each deliverable, as on the EURX page: the CTD page's curve anchor.
+        basis = {}
+        for r in rows.itertuples():
+            b = daily_basis([t for t in trades["efp"] if t["c"] == code and t["x"] == expiry and t.get("isin") == r.isin], float(r.cf))
+            b = {d: {"c": v, "lots": q} for d, (v, q) in b.items() if d in days}
+            if b:
+                basis[r.isin] = b
         out[code] = {
             "market": market, "name": name, "product": product, "expiry": expiry, "lastTrading": str(last_trading),
-            "firstDelivery": str(delivery), "delivery": str(delivery), "face": 100_000, "futures": futures,
+            "firstDelivery": str(delivery), "delivery": str(delivery), "face": 100_000, "futures": futures, "basis": basis,
             "basket": [{"id": r.isin, "name": markets[market].get(r.isin, {}).get("name", r.isin), "coupon": float(r.coupon),
                         "maturity": str(r.maturity), "cf": float(r.cf)} for r in rows.itertuples()],
         }
