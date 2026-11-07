@@ -7,6 +7,8 @@ export const PAGES = [
   { code: "BMNT", href: "BMNT.html", title: "Bond Monitor" },
   { code: "EURX", href: "EURX.html", title: "Eurex Flow" },
   { code: "FIHG", href: "FIHG.html", title: "Fixed Income Hedge" },
+  { code: "GP", href: "GP.html", title: "Historical Graphs" },
+  { code: "WIRP", href: "WIRP.html", title: "Policy Rate Pricing" },
 ];
 
 export const MARKETS = [

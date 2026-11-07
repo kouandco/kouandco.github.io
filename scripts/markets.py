@@ -23,12 +23,16 @@ from functools import cache
 import numpy as np
 import pandas as pd
 import requests
+from pandas.tseries.holiday import USFederalHolidayCalendar
 
-from common import (DATA, UA, add_business_days, curve_eval, dv01, frac_name, get, isin_from_cusip, ns_fit,
+import curves
+from common import (DATA, UA, accrued, add_business_days, curve_eval, dv01, frac_name, get, isin_from_cusip, ns_fit,
                     pricer, session, write_json, years, yield_from_price)
 
 WINDOW = 63           # trading days in the realised-vol window (3 months)
-HISTORY_DAYS = 100    # calendar days of history fetched / kept
+HISTORY_DAYS = 100    # calendar days of history the analytics need
+HISTORY_KEEP = 730    # calendar days of yield history kept for the GP page
+FEDINVEST_PER_RUN = 30
 MARKETS = {
     "UST": {"name": "US Treasuries", "currency": "$", "freq": 2, "settle": 1, "nodes": [2, 5, 7, 10, 20, 30]},
     "DE": {"name": "German Bunds", "currency": "€", "freq": 1, "settle": 2, "nodes": [2, 5, 10, 15, 30]},
@@ -76,27 +80,35 @@ def treasury_terms():
 def ust():
     hist_path, static_path = DATA / "history" / "UST.csv", DATA / "history" / "UST_bonds.csv"
     hist = pd.read_csv(hist_path, index_col=0, parse_dates=True) if hist_path.exists() else pd.DataFrame()
+    hist = hist.dropna(how="all")
     static = pd.read_csv(static_path, dtype={"cusip": str}) if static_path.exists() else pd.DataFrame(
         columns=["cusip", "coupon", "maturity", "term"])
     known = {d.date() for d in hist.index}
-    start = date.today() - timedelta(days=HISTORY_DAYS)
+    start = date.today() - timedelta(days=HISTORY_KEEP)
+    holidays = {d.date() for d in USFederalHolidayCalendar().holidays(start, date.today())}
     missing = [start + timedelta(days=i) for i in range((date.today() - start).days)]
-    missing = [d for d in missing if d.weekday() < 5 and d not in known]
+    missing = [d for d in missing if d.weekday() < 5 and d not in known and d not in holidays]
+    # Newest first, capped per run: a first run backfills the history over several days. Days that come
+    # back empty (not yet published, Good Friday, a FedInvest outage) are not stored, so they are retried.
+    queried = missing[::-1][:FEDINVEST_PER_RUN]
     rows = {}
-    for day in missing:
+    for day in queried:
         px = fedinvest(day)
+        print(f"  FedInvest {day}: {len(px)} notes and bonds")
+        time.sleep(0.5)
+        if not len(px):
+            continue
         settle = add_business_days(day, 1)
         rows[pd.Timestamp(day)] = {
             r.cusip: round(yield_from_price(r.price, r.coupon, r.maturity, settle, 2), 5) for r in px.itertuples()
         }
-        if len(px):
-            new = px[~px.cusip.isin(static.cusip)][["cusip", "coupon", "maturity"]]
-            static = pd.concat([static, new.assign(term=np.nan)], ignore_index=True)
-        print(f"  FedInvest {day}: {len(px)} notes and bonds")
-        time.sleep(0.5)
+        new = px[~px.cusip.isin(static.cusip)][["cusip", "coupon", "maturity"]]
+        static = pd.concat([static, new.assign(term=np.nan)], ignore_index=True)
+    recent = [d for d in queried if d >= date.today() - timedelta(days=7)]
+    if len(recent) >= 2 and not any(pd.Timestamp(d) in rows for d in recent):
+        raise RuntimeError(f"FedInvest returned no prices for {', '.join(map(str, sorted(recent)))}")
     if rows:
-        # Holidays come back empty; keep them as blank rows so they are not queried again.
-        hist = pd.concat([hist, pd.DataFrame.from_dict(rows, orient="index").reindex(list(rows))]).sort_index()
+        hist = pd.concat([hist, pd.DataFrame.from_dict(rows, orient="index")]).sort_index()
     hist = hist[hist.index >= pd.Timestamp(start)]
     if static.term.isna().any():
         terms = treasury_terms()
@@ -155,7 +167,7 @@ def bundesbank():
     raw = pd.concat(frames)
     raw["desc"] = raw.desc.astype(str).str.strip()
     raw = raw[raw.desc.str.match(r"^(BKO|OBL|DBR) ")]
-    raw = raw[raw.date >= pd.Timestamp(date.today() - timedelta(days=HISTORY_DAYS))]
+    raw = raw[raw.date >= pd.Timestamp(date.today() - timedelta(days=HISTORY_KEEP))]
     last = raw.sort_values("date").groupby("id").last()
     group = {"BKO": "Schatz", "OBL": "Bobl", "DBR": "Bund"}
     bonds = pd.DataFrame({
@@ -201,13 +213,16 @@ def parse_coupon(desc, coupon_col, freq):
 
 
 def borsa_history(isin):
-    body = {"request": {"SampleTime": "1d", "TimeFrame": "6m", "RequestedDataSetType": "ohlc", "ChartPriceType": "price",
+    """Daily closing prices. Bars are [time, open, open, high, low, close, volume]; today's bar is still
+    forming during the session, so it is left out."""
+    body = {"request": {"SampleTime": "1d", "TimeFrame": "2y", "RequestedDataSetType": "ohlc", "ChartPriceType": "price",
                         "Key": f"{isin}.MOT", "OffSetTime": 0, "FromDate": None, "ToDate": None, "UseDelay": True,
                         "KeyType": "Topic", "KeyType2": "Topic", "Language": "en-US"}}
     r = session.post("https://charts.borsaitaliana.it/charts/services/ChartWService.asmx/GetPricesWithVolume",
                      json=body, headers={"Referer": "https://www.borsaitaliana.it/"}, timeout=60)
     r.raise_for_status()
-    return {datetime.fromtimestamp(p[0] / 1000, tz=timezone.utc).date(): p[1] for p in r.json().get("d", []) if p[1]}
+    bars = ((datetime.fromtimestamp(p[0] / 1000, tz=timezone.utc).date(), p[5]) for p in r.json().get("d", []))
+    return {d: px for d, px in bars if px and d < date.today()}
 
 
 def borsa_market(path, prefix, keep, prefix_name, freq):
@@ -220,8 +235,8 @@ def borsa_market(path, prefix, keep, prefix_name, freq):
             continue
         px = borsa_history(r.id)
         time.sleep(0.2)
-        px = {d: p for d, p in px.items() if d >= date.today() - timedelta(days=HISTORY_DAYS)}
-        if len(px) < 20:
+        px = {d: p for d, p in px.items() if d >= date.today() - timedelta(days=HISTORY_KEEP)}
+        if sum(d >= date.today() - timedelta(days=HISTORY_DAYS) for d in px) < 20:
             continue
         series[r.id] = {pd.Timestamp(d): round(yield_from_price(p, coupon, r.maturity, add_business_days(d, 2), freq), 5)
                         for d, p in px.items()}
@@ -348,9 +363,91 @@ def analyse(code, bonds, yields):
 SOURCES = {"UST": ust, "DE": bundesbank, "FR": oat, "IT": btp}
 
 
+BENCHMARK_TENORS = {"UST": [2, 3, 5, 7, 10, 20, 30], "DE": [2, 5, 10, 30], "FR": [2, 5, 10, 30], "IT": [2, 5, 10, 30]}
+
+
+def benchmarks(code, bonds, settle):
+    """The actual bond quoted as each generic tenor. UST: the latest issue of each original term (on the run).
+    Bunds: the latest Schatz and Bobl, the newest Bund in the 10-year window and the longest Bund. OATs and BTPs, whose original terms
+    are not published in the price data: the most recently issued line (highest ISIN, as the issuers number
+    lines sequentially) maturing within the tenor's window."""
+    nominal = [b for b in bonds if b["group"] != "Green"]
+    t = lambda b: years(settle, date.fromisoformat(b["maturity"]))
+    out = []
+    for tenor in BENCHMARK_TENORS[code]:
+        if code == "UST":
+            pool, pick = [b for b in nominal if b["group"] == f"{tenor}Y"], lambda b: b["maturity"]
+        elif code == "DE":
+            group = {2: "Schatz", 5: "Bobl"}.get(tenor, "Bund")
+            # Old 30-year Bunds roll into the 10-year window, so the 10-year is the newest line there.
+            pool = [b for b in nominal if b["group"] == group and (tenor != 10 or 8.5 <= t(b) <= 10.75)]
+            pick = (lambda b: b["id"]) if tenor == 10 else (lambda b: b["maturity"])
+        else:
+            lo, hi = {2: (1.5, 2.6), 5: (4, 5.6), 10: (8.5, 10.6), 30: (24, 32)}[tenor]
+            pool, pick = [b for b in nominal if lo <= t(b) <= hi], lambda b: b["id"]
+        if pool:
+            b = max(pool, key=pick)
+            out.append({"tenor": tenor, "id": b["id"], "name": b["name"], "yield": b["yield"], "asw": b.get("asw")})
+    return out
+
+
+def merge_history(code, yields):
+    """Euro-area sources only serve a few months to two years of prices: keep everything seen in
+    data/history/<code>.csv, newer values winning."""
+    path = DATA / "history" / f"{code}.csv"
+    if path.exists():
+        old = pd.read_csv(path, index_col=0, parse_dates=True)
+        yields = yields.combine_first(old) if len(old) else yields
+    yields = yields[yields.index >= pd.Timestamp(date.today() - timedelta(days=HISTORY_KEEP))].sort_index()
+    yields.to_csv(path, float_format="%.5f")
+    return yields
+
+
+def add_asw(code, data, curve_set):
+    if not curve_set:
+        return
+    settle = date.fromisoformat(data["settle"])
+    for b in data["bonds"]:
+        maturity = date.fromisoformat(b["maturity"])
+        dirty = b["price"] + accrued(b["coupon"], maturity, settle, data["freq"])
+        b["asw"] = round(curves.asw(curve_set, code, b["coupon"], maturity, settle, data["freq"], dirty), 1)
+    data["aswSource"] = (f"Par-par asset swap spread vs {'SOFR' if code == 'UST' else '6M Euribor'} "
+                         f"({'SOFR' if code == 'UST' else '€STR'} discounting), Eurex Clearing curves of "
+                         f"{curve_set[next(iter(curve_set))].as_of}.")
+
+
+def write_gp(code, data, yields):
+    """data/gp/<code>.json: daily yield (and ASW, archived from the day it was added) of every current bond."""
+    ids = [b["id"] for b in data["bonds"]]
+    y = yields.reindex(columns=ids).dropna(how="all")
+    asw_path = DATA / "history" / f"ASW_{code}.csv"
+    asw = pd.read_csv(asw_path, index_col=0) if asw_path.exists() else pd.DataFrame()
+    if any("asw" in b for b in data["bonds"]):
+        today = pd.DataFrame({b["id"]: b["asw"] for b in data["bonds"]}, index=[data["asOf"]])
+        asw = pd.concat([asw.drop(index=data["asOf"], errors="ignore"), today]).sort_index()
+        asw = asw[asw.index >= str(date.today() - timedelta(days=HISTORY_KEEP))]
+        asw.index.name = "date"
+        asw.to_csv(asw_path, float_format="%.1f")
+    col = lambda df, i, d: [None if pd.isna(v) else round(float(v), d) for v in df[i]] if i in df else None
+    write_json(DATA / "gp" / f"{code}.json", {
+        "market": code, "freq": data["freq"], "settleDays": MARKETS[code]["settle"],
+        "dates": [str(d.date()) for d in y.index],
+        "bonds": [{"id": b["id"], "name": b["name"], "group": b["group"], "coupon": b["coupon"], "maturity": b["maturity"]}
+                  for b in data["bonds"]],
+        "yield": {i: col(y, i, 4) for i in ids},
+        "aswDates": list(asw.index.astype(str)),
+        "asw": {i: col(asw, i, 1) for i in ids if i in asw},
+    })
+
+
 def build(code):
     bonds, yields = SOURCES[code]()
+    if code != "UST":
+        yields = merge_history(code, yields)
     data = analyse(code, bonds, yields)
+    add_asw(code, data, curves.load())
+    data["benchmarks"] = benchmarks(code, data["bonds"], date.fromisoformat(data["settle"]))
+    write_gp(code, data, yields)
     path = DATA / "markets" / f"{code}.json"
     try:
         data["repo"] = us_repo() if code == "UST" else eur_repo()

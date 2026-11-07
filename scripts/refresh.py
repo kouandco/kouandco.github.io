@@ -10,16 +10,24 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import auctions
+import curves
 import eurex_trades
 import futures
+import history
 import markets
+import wirp
 from common import DATA, write_json
 
+# Order matters: markets use the curves for asset swap spreads; futures, WIRP and the GP history use
+# the market and curve files.
 STEPS = [
     ("Eurex trades", eurex_trades.build),
+    ("Swap curves", curves.build),
     *[(f"Market {code}", lambda code=code: markets.build(code)) for code in markets.SOURCES],
     ("Futures baskets", futures.build),
     ("Auctions", auctions.build),
+    ("Policy pricing", wirp.build),
+    ("GP history", history.build),
 ]
 
 

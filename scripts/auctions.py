@@ -10,6 +10,7 @@ from the issuers' own websites, with links to the official notices.
 """
 
 import io
+import json
 import re
 from datetime import date, datetime, timedelta
 
@@ -140,6 +141,15 @@ def italy():
     out = []
     for h in links:
         out += [d for d in mef_announcement(base + h) if d["status"]]
+    # MEF's page lists only its latest few notices, so an announcement drops off while its auction is still
+    # recent: keep auctions found on earlier runs while they are inside the window.
+    path = DATA / "auctions.json"
+    old = json.loads(path.read_text())["markets"].get("IT", {}).get("deals", []) if path.exists() else []
+    seen = {(d["date"], d["id"]) for d in out}
+    for d in old:
+        status = window(date.fromisoformat(d["date"])) if d.get("date") else None
+        if status and (d["date"], d["id"]) not in seen:
+            out.append({**d, "status": status})
     return {"source": "MEF Department of the Treasury",
             "calendar": f"{base}/en/debito_pubblico/emissioni_titoli_di_stato_interni/calendari_emissioni/", "deals": out}
 

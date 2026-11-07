@@ -87,6 +87,11 @@ def pricer(coupon, maturity, settle, freq):
     return price
 
 
+def accrued(coupon, maturity, settle, freq):
+    prev, nxt, _ = schedule(maturity, settle, freq)
+    return coupon / freq * (settle - prev).days / (nxt - prev).days
+
+
 def yield_from_price(price, coupon, maturity, settle, freq):
     f = pricer(coupon, maturity, settle, freq)
     lo, hi = -5.0, 30.0

@@ -18,6 +18,7 @@ import re
 from datetime import date, timedelta
 
 import pandas as pd
+from pandas.tseries.holiday import USFederalHolidayCalendar
 
 from common import DATA, add_business_days, add_months, get, parse_date, write_json
 
@@ -91,13 +92,24 @@ def ust_eligible(code, term, maturity, first, last):
         return term == 30 and maturity >= add_months(first, 300)
 
 
+def us_business_days(d, n):
+    """`n` US business days after `d` (weekends and federal holidays skipped)."""
+    holidays = {h.date() for h in USFederalHolidayCalendar().holidays(d, d + timedelta(days=n + 10))}
+    while n > 0:
+        d += timedelta(days=1)
+        if d.weekday() < 5 and d not in holidays:
+            n -= 1
+    return d
+
+
 def build_ust(today):
     bonds = json.loads((DATA / "markets" / "UST.json").read_text())["bonds"]
     first = ust_front(today)
     last = last_business_day(first.year, first.month)
     out = {}
     for code, (name, round_months, face, last_rule) in UST_CONTRACTS.items():
-        delivery = add_business_days(last, 3) if last_rule == "bd3" else last
+        # TU and FV deliver up to the third business day of the following month.
+        delivery = us_business_days(last, 3) if last_rule == "bd3" else last
         basket = []
         for b in bonds:
             term = int(b["group"][:-1]) if b["group"].endswith("Y") else None
@@ -108,6 +120,19 @@ def build_ust(today):
         out[code] = {"market": "UST", "name": name, "expiry": f"{first:%Y-%m}", "firstDelivery": str(first),
                      "delivery": str(delivery), "face": face, "futures": None, "basket": basket}
     return out
+
+
+def archive_cfs(df):
+    """Keep every notified conversion factor in data/history/eurex_cf.csv: Eurex lists only current and
+    future deliveries, and the GP page's basis history needs the factors of expired contracts too."""
+    path = DATA / "history" / "eurex_cf.csv"
+    codes = {product: code for code, (product, *_rest) in EUREX_CONTRACTS.items()}
+    new = pd.DataFrame({"contract": df["product"].map(codes), "expiry": [f"{d:%Y-%m}" for d in df.delivery],
+                        "delivery": df.delivery.astype(str), "isin": df["isin"], "coupon": df.coupon,
+                        "maturity": df.maturity.astype(str), "cf": df.cf}).dropna(subset=["contract"])
+    old = pd.read_csv(path, dtype=str) if path.exists() else pd.DataFrame(columns=new.columns)
+    out = pd.concat([old, new.astype(str)]).drop_duplicates(["contract", "expiry", "isin"], keep="last")
+    out.sort_values(["contract", "expiry", "maturity"]).to_csv(path, index=False)
 
 
 def eurex_front(today, deliveries):
@@ -123,8 +148,12 @@ def build_eurex(today):
     df = pd.read_csv(io.StringIO(get("https://www.eurex.com" + href).text), sep=";")
     df.columns = ["contract", "isin", "coupon", "maturity", "cf"]
     df["product"] = df.contract.str.split().str[0]
-    df["delivery"] = pd.to_datetime(df.contract.str.split().str[2], format="%Y%m%d").dt.date
+    # The date in the series name ("FGBL SI 20261208 PS") is the last trading day; delivery is two
+    # exchange days later (the 10th of the month, or the next exchange day).
+    df["lastTrading"] = pd.to_datetime(df.contract.str.split().str[2], format="%Y%m%d").dt.date
+    df["delivery"] = [add_business_days(d, 2) for d in df.lastTrading]
     df["maturity"] = pd.to_datetime(df.maturity, format="%d.%m.%Y").dt.date
+    archive_cfs(df)
     trades = json.loads((DATA / "eurex_trades.json").read_text())
     markets = {m: {b["id"]: b for b in json.loads((DATA / "markets" / f"{m}.json").read_text())["bonds"]}
                for m in ("DE", "FR", "IT")}
@@ -134,6 +163,7 @@ def build_eurex(today):
         delivery = eurex_front(today, set(rows.delivery))
         rows = rows[rows.delivery == delivery].sort_values(["maturity", "coupon"])
         expiry = f"{delivery:%Y-%m}"
+        last_trading = rows.lastTrading.iloc[0]
         # Daily VWAP of the futures leg of EFP trades, so pages can match the date of their bond prices.
         vwap = {}
         for t in trades["efp"]:
@@ -144,8 +174,8 @@ def build_eurex(today):
         futures = {"vwap": {d: round(vwap[d][0] / vwap[d][1], 4) for d in days},
                    "lots": {d: vwap[d][1] for d in days}} if days else None
         out[code] = {
-            "market": market, "name": name, "product": product, "expiry": expiry, "firstDelivery": str(delivery),
-            "delivery": str(delivery), "face": 100_000, "futures": futures,
+            "market": market, "name": name, "product": product, "expiry": expiry, "lastTrading": str(last_trading),
+            "firstDelivery": str(delivery), "delivery": str(delivery), "face": 100_000, "futures": futures,
             "basket": [{"id": r.isin, "name": markets[market].get(r.isin, {}).get("name", r.isin), "coupon": float(r.coupon),
                         "maturity": str(r.maturity), "cf": float(r.cf)} for r in rows.itertuples()],
         }
