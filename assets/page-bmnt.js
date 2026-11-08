@@ -7,8 +7,6 @@ frame("BMNT");
 const app = $("#app");
 const HORIZON = 0.25; // years
 const HAIRCUT = { UST: 2, DE: 2, FR: 3, IT: 5 };
-// Contract whose delivery sets the boxing window on the repo curve.
-const MAIN = { UST: "TY", DE: "RX", FR: "OAT", IT: "IK" };
 const REPO_TICKS = [0, 1, 2, 3, 4, 5, 6].map((m) => ({ x: m / 12, label: m ? `${m}M` : "0" }));
 
 try {
@@ -22,18 +20,16 @@ try {
 function start(contracts, auctions, markets) {
   const codes = MARKETS.map((m) => m.code);
   let mcode = hashParam("m", "DE", codes);
-  // market -> {repo pillars, boxing / delivery rates (null = interpolated), haircut, overrides: id -> {gc, special},
-  //            table filters, carry / roll chart mode}
+  // market -> {GC repo pillars, haircut, overrides: id -> {gc, special}, table filters, carry / roll chart mode}
   const state = {};
   const stateFor = (m) => (state[m] ??= {
-    repo: markets[m].repo.points.map((p) => ({ ...p })), box: null, dlv: null, haircut: HAIRCUT[m], overrides: {},
+    repo: markets[m].repo.points.map((p) => ({ ...p })), haircut: HAIRCUT[m], overrides: {},
     group: "All", search: "", short: false, crMode: "outright",
   });
 
   const marketTabs = el("div");
   const chart = el("div", { class: "plot" });
   const repoHost = el("div");
-  const boxHost = el("div", { class: "row small", style: { marginTop: "6px" } });
   const repoNote = el("p", { class: "note" });
   const auctionHost = el("div");
   const hedgeHost = el("div");
@@ -53,10 +49,9 @@ function start(contracts, auctions, markets) {
           el("button", { class: "btn", onclick: () => {
             const st = stateFor(mcode);
             st.repo = markets[mcode].repo.points.map((p) => ({ ...p }));
-            st.box = st.dlv = null;
             recompute();
           } }, "Reset")),
-        repoHost, boxHost, repoNote)),
+        repoHost, repoNote)),
     el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Auctions and syndications: recent and upcoming"), auctionHost),
     el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge futures (front contracts)"), hedgeHost),
     el("section", { class: "panel", style: { marginTop: "10px" } },
@@ -65,88 +60,22 @@ function start(contracts, auctions, markets) {
     el("section", { class: "panel", style: { marginTop: "10px" } }, controls, tableHost, tableNote),
     methodNote());
 
-  // ---- repo curve with boxing and delivery points
-  // The curve runs from S/N (O/N for UST) flat to the boxing date (5 business days before the main contract's
-  // delivery), then to the delivery date and on to the pillars beyond it. Boxing and delivery are points of their own:
-  // by default boxing sits on the flat S/N rate and delivery is interpolated towards the next pillar; both can be
-  // dragged. The boxing premium is the forward rate between boxing and delivery minus that default forward, so
-  // typing a premium moves the boxing rate (with delivery held).
+  // ---- GC repo curve: the market's pillars, each draggable (CTD repo and boxing are set on the CTD page)
+  const shownRepo = () => stateFor(mcode).repo.filter((p) => p.t <= 0.5 + 1e-9);
   const repoEditor = curveEditor({
     width: 720, height: 260, xTitle: "Term", yTitle: "Rate (%)", yDigits: 3, step: 0.005, xTicks: REPO_TICKS,
     onChange: (pts, i) => {
-      const st = stateFor(mcode);
-      const p = repoCurve().points.filter((q) => q.t <= 0.5 + 1e-9)[i];
-      if (p.kind === "box") st.box = pts[i].y;
-      else if (p.kind === "dlv") st.dlv = pts[i].y;
-      else if (p.kind === "first") st.repo[0].rate = pts[i].y;
-      else p.rate = pts[i].y;  // a pillar of st.repo beyond delivery
+      shownRepo()[i].rate = pts[i].y;
       recompute({ dragging: true });
     },
   });
   repoHost.append(repoEditor.node);
 
-  function repoCurve() {
-    const market = markets[mcode];
-    const st = stateFor(mcode);
-    const contract = contracts[MAIN[mcode]];
-    const settle = parseDate(market.settle);
-    const delivery = parseDate(contract.delivery);
-    let box = delivery;
-    for (let n = 0; n < 5;) {
-      box = new Date(box - 864e5);
-      if (box.getUTCDay() % 6) n++;
-    }
-    const [first, ...rest] = st.repo;
-    const tD = Math.max(yearsBetween(settle, delivery), first.t + 2 / 365);
-    const tB = Math.min(Math.max(yearsBetween(settle, box), first.t + 1 / 365), tD - 1 / 365);
-    const after = rest.filter((p) => p.t > tD + 1e-9);
-    const rB0 = first.rate;
-    const next = after[0] ?? { t: tD + 1, rate: rB0 };
-    const rD0 = rB0 + ((next.rate - rB0) * (tD - tB)) / (next.t - tB);
-    const rB = st.box ?? rB0;
-    const rD = st.dlv ?? rD0;
-    const fwd = (b, d) => (d * tD - b * tB) / (tD - tB);
-    return {
-      code: MAIN[mcode], box, delivery, tB, tD, rB, rD, fwd: fwd(rB, rD), fwd0: fwd(rB0, rD0),
-      premium: (fwd(rB, rD) - fwd(rB0, rD0)) * 100,
-      points: [{ ...first, label: mcode === "UST" ? "O/N" : "S/N", kind: "first" }, { t: tB, rate: rB, label: "Box", kind: "box" },
-        { t: tD, rate: rD, label: "Dlv", kind: "dlv" }, ...after],
-    };
-  }
-
-  function renderRepo(bx, dragging = false) {
-    const st = stateFor(mcode);
-    const day = (d) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
-    const anchor = { box: "end", dlv: "start" };
-    repoEditor.update(bx.points.filter((p) => p.t <= 0.5 + 1e-9).map((p) => ({ x: p.t, y: p.rate, label: p.label, anchor: anchor[p.kind] })), [], {
-      keepRange: dragging,
-      extra: {
-        lines: [{ x: bx.tB, label: `Box ${day(bx.box)}` }, { x: bx.tD, label: `Dlv ${day(bx.delivery)}` }],
-        segments: [{ x0: bx.tB, x1: bx.tD, y: bx.fwd }],
-      },
-    });
-    if (dragging) {
-      if (premiumInput) premiumInput.value = bx.premium.toFixed(1);
-      return;
-    }
-    premiumInput = el("input", { type: "number", step: "1", value: bx.premium.toFixed(1), "aria-label": "Boxing premium in bp" });
-    premiumInput.addEventListener("change", () => {
-      // Hold delivery, solve the boxing rate for the requested forward between boxing and delivery.
-      const target = bx.fwd0 + (+premiumInput.value || 0) / 100;
-      st.box = (bx.rD * bx.tD - target * (bx.tD - bx.tB)) / bx.tB;
-      recompute();
-    });
-    boxHost.replaceChildren(
-      el("label", {}, "Boxing premium (bp) ", premiumInput),
-      el("span", {}, `${bx.code}: repo to boxing (${day(bx.box)}) ${bx.rB.toFixed(3)}%, to delivery (${day(bx.delivery)}) `,
-        el("b", { class: "amber" }, `${bx.rD.toFixed(3)}%`),
-        `; forward boxing → delivery ${bx.fwd.toFixed(3)}% (red) vs ${bx.fwd0.toFixed(3)}% unboxed.`));
+  function renderRepo(dragging = false) {
+    repoEditor.update(shownRepo().map((p) => ({ x: p.t, y: p.rate, label: p.label })), [], { keepRange: dragging });
     repoNote.textContent = `${markets[mcode].repo.source}${mcode === "UST" ? "" : " €STR stands in for S/N."} Drag any point; ` +
-      "the curve is flat from the first point to the boxing date. The boxing premium is the extra forward rate priced between " +
-      "boxing and delivery; changing it moves the boxing rate. The delivery rate is the term repo for the hedge futures' net basis; " +
-      "the 3M point sets the GC column (each row can be overwritten).";
+      "the 3M point sets the GC column (each row can be overwritten). The futures' CTD repo, with the boxing option, is set on the CTD page.";
   }
-  let premiumInput = null;
 
   // ---- auctions and syndications
   function renderAuctions() {
@@ -173,8 +102,7 @@ function start(contracts, auctions, markets) {
     const market = markets[mcode];
     const st = stateFor(mcode);
     const settle = parseDate(market.settle);
-    const bx = repoCurve();
-    const gc3m = repoAt(bx.points, HORIZON);
+    const gc3m = repoAt(st.repo, HORIZON);
     const curveFor = (g) => market.groups[g]?.fit ?? market.curve;
     const shortest = Math.min(...market.bonds.map((b) => yearsBetween(settle, parseDate(b.maturity))));
     const rows = market.bonds.map((b) => {
@@ -217,7 +145,7 @@ function start(contracts, auctions, markets) {
       r.rob = (((c + rd) * r.dv01 - nb) / r.dirty) * 100;       // % of the bond's dirty price
       r.roc = r.rob / (st.haircut / 100);
     }
-    return { rows, legs, gc3m, bx };
+    return { rows, legs, gc3m };
   }
 
   // ---- render
@@ -225,8 +153,8 @@ function start(contracts, auctions, markets) {
   function recompute({ dragging = false } = {}) {
     const market = markets[mcode];
     const st = stateFor(mcode);
-    const { rows, legs, gc3m, bx } = compute();
-    renderRepo(bx, dragging);
+    const { rows, legs, gc3m } = compute();
+    renderRepo(dragging);
     renderHedge(legs);
     renderChart(rows, legs);
     const q = st.search.toLowerCase();

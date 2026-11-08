@@ -21,9 +21,10 @@ export const FUTURES_BY_MARKET = {
 // Basis quoting: 32nds for Treasury futures, cents (0.01 points) for Eurex.
 export const basisUnit = (market) => (market === "UST" ? { mult: 32, label: "/32" } : { mult: 100, label: "c" });
 
-// Deliverables priced for delivery. `inputs` maps bond id -> {y, beta, cf} overrides; `repo` (%) finances
-// every bond from settlement to delivery.
-export function prepare(contract, market, { inputs = {}, repo } = {}) {
+// Deliverables priced for delivery. `inputs` maps bond id -> {y, beta, cf} overrides; `repo` (%) is the GC rate
+// that finances every bond from settlement to delivery, and `repoById` (bond id -> %) a bond's own term repo
+// (the CTD's special or boxed rate).
+export function prepare(contract, market, { inputs = {}, repo, repoById = {} } = {}) {
   const settle = parseDate(market.settle);
   const delivery = parseDate(contract.delivery);
   const T = Math.max(yearsBetween(settle, delivery), 0);
@@ -38,10 +39,11 @@ export function prepare(contract, market, { inputs = {}, repo } = {}) {
     const y = o.y ?? mb.yield;
     const cf = o.cf ?? d.cf;
     const clean = spot.price(y);
-    const fwdClean = forwardPrice(bond, clean, settle, delivery, r);
+    const repoRate = repoById[d.id] ?? r;
+    const fwdClean = forwardPrice(bond, clean, settle, delivery, repoRate);
     return {
       id: d.id, name: mb.name, coupon: d.coupon, maturity: d.maturity, t: yearsBetween(settle, bond.maturity),
-      y, beta: o.beta ?? mb.beta ?? 1, cf, clean, dv01: spot.dv01(y),
+      y, beta: o.beta ?? mb.beta ?? 1, cf, clean, dv01: spot.dv01(y), repo: repoRate,
       fwdClean, fwdYield: yieldFromPrice(atDelivery.price, fwdClean), price: atDelivery.price,
       ratio0: fwdClean / cf, carry: clean - fwdClean,
     };
@@ -55,7 +57,7 @@ export function yieldForRatio(model, market, id, target) {
   const settle = model.settle;
   const bond = { coupon: b.coupon, maturity: parseDate(b.maturity), freq: market.freq };
   const spot = pricer(bond.coupon, bond.maturity, settle, bond.freq);
-  const f = (y) => forwardPrice(bond, spot.price(y), settle, model.delivery, model.repo) / b.cf;
+  const f = (y) => forwardPrice(bond, spot.price(y), settle, model.delivery, b.repo) / b.cf;
   return yieldFromPrice(f, target);
 }
 
