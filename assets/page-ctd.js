@@ -32,7 +32,7 @@ function start(contracts, markets) {
   let ccode = hashParam("c", null, FUTURES_BY_MARKET[mcode]) ?? defaultContract(mcode);
   const nodes = {};            // market -> generic curve points {t, base, y, drift, vol}
   const inputs = {};           // contract -> bond id -> {y (before curve shift), beta, cf}
-  const ctdRepo = {};          // contract -> CTD repo overrides {box, dlv} (% to the boxing and delivery dates; null = GC)
+  const ctdRepo = {};          // contract -> CTD repo overrides {sn, box, dlv} (% S/N, to boxing, to delivery; null = GC)
   const added = {};            // contract -> bonds added to the basket {id, name, coupon, maturity, cf, yield?, beta?, custom}
   for (const m of codes) nodes[m] = freshNodes(markets[m]);
 
@@ -95,9 +95,9 @@ function start(contracts, markets) {
       el("div", { class: "grid cols-2", style: { alignItems: "start" } },
         repoEditorHost,
         el("div", { class: "stack" }, repoControls,
-          el("p", { class: "note" }, "Blue dots: GC repo curve (proxy). Box and Dlv start on GC; drag them or type the CTD's term repo to delivery "
-            + "(special = GC − CTD repo). The boxing premium is the extra forward rate priced between boxing and delivery (red); typing it moves the boxing rate "
-            + "with delivery held. The CTD is financed at the delivery rate; the Bond Monitor's net basis uses GC.")))),
+          el("p", { class: "note" }, "S/N, S/Box and S/Dlv start on the GC repo curve (proxy); drag them or type the CTD's term repo to delivery "
+            + "(special = GC − CTD repo). The boxing premium is the extra forward rate priced between boxing and delivery (red); typing it moves S/Box "
+            + "with S/Dlv held. The CTD is financed at S/Dlv; the Bond Monitor's net basis uses GC.")))),
     el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
       el("section", { class: "panel" },
         el("div", { class: "row", style: { justifyContent: "space-between" } },
@@ -183,14 +183,14 @@ function start(contracts, markets) {
     return { inputs: ins, repoById: { [ctdId]: repoBox().rD }, ctdId };
   }
 
-  // ---- CTD repo with boxing (as the GC curve on BMNT used to show it, now for the CTD alone)
-  // Two points: the boxing date (5 business days before delivery) and delivery. By default both sit on the GC
-  // repo curve; either can be dragged or typed. The CTD is financed at the delivery rate (term repo to delivery).
-  // The boxing premium is the forward rate between boxing and delivery minus that forward on GC; typing a premium
-  // moves the boxing rate with delivery held, as on the futures desk's box.
+  // ---- CTD repo with boxing
+  // Three term rates for the CTD: S/N (O/N for UST), S/Box (to the boxing date, 5 business days before delivery)
+  // and S/Dlv (to delivery). By default they sit on the GC repo curve; each can be dragged, and S/Dlv typed.
+  // The CTD is financed at S/Dlv. The boxing premium is the forward rate between boxing and delivery minus that
+  // forward on GC; typing a premium moves S/Box with S/Dlv held.
   function repoBox() {
     const { market, contract } = current();
-    const st = (ctdRepo[ccode] ??= { box: null, dlv: null });
+    const st = (ctdRepo[ccode] ??= { sn: null, box: null, dlv: null });
     const settle = parseDate(market.settle);
     const delivery = parseDate(contract.delivery);
     let box = delivery;
@@ -204,15 +204,16 @@ function start(contracts, markets) {
     const rB0 = repoAt(gc, tB), rD0 = repoAt(gc, tD);
     const rB = st.box ?? rB0, rD = st.dlv ?? rD0;
     const fwd = (b, d) => (d * tD - b * tB) / (tD - tB);
-    return { st, box, delivery, tB, tD, rB, rD, rB0, rD0, fwd: fwd(rB, rD), fwd0: fwd(rB0, rD0),
-      premium: (fwd(rB, rD) - fwd(rB0, rD0)) * 100, gc };
+    const tN = gc[0].t, rN = st.sn ?? gc[0].rate;
+    return { st, box, delivery, tN, rN, tB, tD, rB, rD, rB0, rD0, fwd: fwd(rB, rD), fwd0: fwd(rB0, rD0),
+      premium: (fwd(rB, rD) - fwd(rB0, rD0)) * 100, sn: mcode === "UST" ? "O/N" : "S/N" };
   }
+  // x in days from settlement (ticks follow the range: delivery is weeks to months away).
   const repoEditor = curveEditor({
-    width: 720, height: 220, xTitle: "Term", yTitle: "Repo (%)", yDigits: 3, step: 0.005,
-    xTicks: [0, 1, 2, 3, 4, 5, 6].map((m) => ({ x: m / 12, label: m ? `${m}M` : "0" })),
+    width: 720, height: 220, xTitle: "Days from settlement", yTitle: "Repo (%)", yDigits: 3, step: 0.005, xPad: 0.18,
     onChange: (pts, i) => {
       const b = repoBox();
-      if (i === 0) b.st.box = pts[i].y; else b.st.dlv = pts[i].y;
+      b.st[["sn", "box", "dlv"][i]] = pts[i].y;
       recompute({ draggingRepo: true });
     },
   });
@@ -221,14 +222,20 @@ function start(contracts, markets) {
   function renderRepoBox(model, ctdName, dragging = false) {
     const b = repoBox();
     const day = (d) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+    const days = (t) => t * 365.25;
     repoEditor.update(
-      [{ x: b.tB, y: b.rB, label: "Box", anchor: "end" }, { x: b.tD, y: b.rD, label: "Dlv", anchor: "start" }],
-      b.gc.filter((p) => p.t <= 0.5 + 1e-9).map((p) => ({ x: p.t, y: p.rate, name: `GC ${p.label} ${p.rate.toFixed(3)}%`, color: "#5fa8ff" })),
-      { keepRange: dragging, extra: { lines: [{ x: b.tB, label: `Box ${day(b.box)}` }, { x: b.tD, label: `Dlv ${day(b.delivery)}` }],
-        segments: [{ x0: b.tB, x1: b.tD, y: b.fwd }] } });
+      [{ x: days(b.tN), y: b.rN, label: b.sn }, { x: days(b.tB), y: b.rB, label: "S/Box", anchor: "end" },
+        { x: days(b.tD), y: b.rD, label: "S/Dlv", anchor: "end" }],
+      [],
+      { keepRange: dragging, extra: { lines: [{ x: days(b.tB), label: `Box ${day(b.box)}` }, { x: days(b.tD), label: `Dlv ${day(b.delivery)}` }],
+        segments: [{ x0: days(b.tB), x1: days(b.tD), y: b.fwd }] } });
+    const summary = () => [`${ctdName}: ${b.sn} ${b.rN.toFixed(3)}%, S/Box (${day(b.box)}) ${b.rB.toFixed(3)}%, S/Dlv (${day(b.delivery)}) `,
+      el("b", { class: "amber" }, `${b.rD.toFixed(3)}%`), ` (GC ${b.rD0.toFixed(3)}%, special ${fmt.s((b.rD0 - b.rD) * 100, 1)}bp); `
+      + `forward boxing → delivery ${b.fwd.toFixed(3)}% vs ${b.fwd0.toFixed(3)}% on GC. Other deliverables: GC ${model.repo.toFixed(3)}%.`];
     if (dragging) {
       repoInputs.dlv.value = b.rD.toFixed(3);
       repoInputs.premium.value = b.premium.toFixed(1);
+      repoInputs.summary.replaceChildren(...summary());
       return;
     }
     const dlv = el("input", { type: "number", step: "0.01", value: b.rD.toFixed(3), "aria-label": "CTD repo to delivery" });
@@ -240,14 +247,12 @@ function start(contracts, markets) {
       b.st.box = (b.rD * b.tD - target * (b.tD - b.tB)) / b.tB;
       recompute();
     });
-    repoInputs = { dlv, premium };
+    repoInputs = { dlv, premium, summary: el("span", { class: "small" }, ...summary()) };
     repoControls.replaceChildren(
       el("label", {}, "CTD repo to delivery % ", dlv),
       el("label", {}, "Boxing premium bp ", premium),
-      el("button", { class: "btn", onclick: () => { b.st.box = b.st.dlv = null; recompute(); } }, "Reset to GC"),
-      el("span", { class: "small" }, `${ctdName}: repo to boxing (${day(b.box)}) ${b.rB.toFixed(3)}%, to delivery (${day(b.delivery)}) `,
-        el("b", { class: "amber" }, `${b.rD.toFixed(3)}%`), ` (GC ${b.rD0.toFixed(3)}%, special ${fmt.s((b.rD0 - b.rD) * 100, 1)}bp); `
-        + `forward boxing → delivery ${b.fwd.toFixed(3)}% vs ${b.fwd0.toFixed(3)}% on GC. Other deliverables: GC ${model.repo.toFixed(3)}%.`));
+      el("button", { class: "btn", onclick: () => { b.st.sn = b.st.box = b.st.dlv = null; recompute(); } }, "Reset to GC"),
+      repoInputs.summary);
   }
   let repoInputs = null;
   function setInput(id, patch) {

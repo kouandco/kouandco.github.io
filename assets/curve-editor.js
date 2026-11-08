@@ -10,8 +10,9 @@ const svg = (tag, attrs = {}) => {
   return n;
 };
 
+// xPad: room to the right of the last point, as a share of its x (labels of a point at the edge need more).
 export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "", yDigits = 2, xTicks, step = 0.005,
-  onChange, onSelect, format = (p) => p.y.toFixed(yDigits) }) {
+  xPad = 0.04, onChange, onSelect, format = (p) => p.y.toFixed(yDigits) }) {
   const m = { l: 52, r: 14, t: 18, b: 36 };
   const root = svg("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": `${yTitle} curve, drag points to edit` });
   const wrap = document.createElement("div");
@@ -33,7 +34,7 @@ export function curveEditor({ width = 720, height = 300, xTitle = "", yTitle = "
     const xs = all.map((p) => p.x);
     const ys = all.map((p) => p.y);
     const pad = Math.max((Math.max(...ys) - Math.min(...ys)) * 0.25, 0.1);
-    range = { x0: 0, x1: Math.max(...xs) * 1.04, y0: Math.min(...ys) - pad, y1: Math.max(...ys) + pad };
+    range = { x0: 0, x1: Math.max(...xs) * (1 + xPad), y0: Math.min(...ys) - pad, y1: Math.max(...ys) + pad };
   }
 
   function draw() {
