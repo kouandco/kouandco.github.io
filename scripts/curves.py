@@ -32,7 +32,7 @@ SWAPS = {  # label: (projection, discounting, fixed-leg months, float-leg months
     "EUR 6M": ("EUR.EURIBOR.6M", "EUR.ESTR.1D", 12, 6, "30/360", 360),
     "GBP SONIA": ("GBP.SONIA.1D", "GBP.SONIA.1D", 12, 12, 365, 365),
 }
-SWAP_TENORS = (2, 5, 10, 30)
+SWAP_TENORS = (1, 2, 3, 5, 7, 10, 15, 20, 30)   # archived daily for backtests (TEST) and GP
 
 
 def download():

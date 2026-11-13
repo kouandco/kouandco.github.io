@@ -257,7 +257,7 @@ function start(data) {
       selectField("ccy", "Currency", [["USD", "USD"], ["EUR", "EUR"]], (v) => { state.ccy = v; useIndex(INDICES[v][0].code); }),
       selectField("idx", "Floating index", [], (v) => useIndex(v)),
       selectField("pay", "Direction", [["pay", "Pay fixed"], ["rec", "Receive fixed"]], (v) => { state.pay = v === "pay"; render(); }),
-      numberField("notional", "Notional", { step: 1_000_000, min: 0 }, (v) => { state.notional = v; render(); }),
+      numberField("notional", "Notional (mm)", { step: 1, min: 0 }, (v) => { state.notional = v * 1e6; render(); }),
       dateField("start", "Start date", (d) => { state.start = d; if (state.tenor !== "custom") state.end = addMonths(d, 12 * parseInt(state.tenor)); render(); }),
       selectField("tenor", "Tenor", [...SWAP_TENORS.map((t) => [t, t]), ["custom", "custom"]], (v) => {
         state.tenor = v;
@@ -331,7 +331,7 @@ function start(data) {
     inputs.ccy.value = state.ccy;
     inputs.idx.setOptions(INDICES[state.ccy].map((i) => [i.code, i.label]), state.idx);
     inputs.pay.value = state.pay ? "pay" : "rec";
-    set("notional", Math.round(state.notional));
+    set("notional", +(state.notional / 1e6).toFixed(6));
     set("start", iso(state.start));
     set("end", iso(state.end));
     inputs.tenor.value = state.tenor;

@@ -1,0 +1,29 @@
+/* Additions to terminal.css for the risk pages: stacked input fields, forms, commentary. */
+.form { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: flex-end; }
+.fld { display: inline-flex; flex-direction: column; gap: 2px; font-size: 11.5px; }
+.fld > span { color: var(--amber); white-space: nowrap; }
+.fld input[type="number"] { width: 6.5em; }
+.fld input[type="text"] { width: 9em; }
+.form-group + .form-group { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.form-group > .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+.advice { margin: 0; padding-left: 18px; }
+.advice li { margin: 4px 0; }
+.advice b { color: var(--amber); font-weight: 600; }
+tr.sel td { background: #262010; }
+tr.sel td:first-child { box-shadow: inset 2px 0 0 var(--amber); }
+tr.best td.l { color: var(--up); }
+.checklist { list-style: none; padding: 0; margin: 0; }
+.checklist li { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #181818; }
+.checklist li.done span.t { color: var(--muted); text-decoration: line-through; }
+.checklist .when { margin-left: auto; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.copybox { white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--line); padding: 8px 10px; font-size: 12px; }
+.pill { display: inline-block; padding: 0 6px; border: 1px solid var(--line); font-size: 11px; }
+.pill.ok { color: var(--up); border-color: rgba(61, 220, 132, 0.4); }
+.pill.warn { color: var(--yellow); border-color: rgba(255, 210, 77, 0.4); }
+.pill.bad { color: var(--down); border-color: rgba(255, 92, 92, 0.4); }
+.menu { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.menu a { display: block; background: var(--panel); border: 1px solid var(--line); padding: 12px 14px; color: var(--text); }
+.menu a:hover { border-color: var(--amber); text-decoration: none; }
+.menu .code { color: #000; background: var(--amber); font-weight: 700; padding: 0 6px; margin-right: 8px; }
+.menu .name { color: var(--amber); font-weight: 600; }
+.menu p { color: var(--muted); margin-top: 6px; }

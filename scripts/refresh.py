@@ -13,6 +13,7 @@ import auctions
 import curves
 import eurex_trades
 import futures
+import fx
 import history
 import markets
 import wirp
@@ -28,6 +29,7 @@ STEPS = [
     ("Auctions", auctions.build),
     ("Policy pricing", wirp.build),
     ("GP history", history.build),
+    ("FX rates", fx.build),
 ]
 
 

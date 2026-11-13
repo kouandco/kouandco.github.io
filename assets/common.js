@@ -10,6 +10,8 @@ export const PAGES = [
   { code: "GP", href: "GP.html", title: "Historical Graphs" },
   { code: "WIRP", href: "WIRP.html", title: "Policy Rate Pricing" },
   { code: "IRS", href: "IRS.html", title: "Swap Pricer" },
+  { code: "TEST", href: "TEST.html", title: "Strategy Backtest" },
+  { code: "BLOT", href: "BLOT.html", title: "Portfolio Risk" },
 ];
 
 export const MARKETS = [

@@ -125,14 +125,14 @@ function start(contracts, markets) {
     const bondSel = el("select", { "aria-label": "Bond" }, options.map((x) =>
       el("option", { value: x.id, selected: x.id === state.bond }, `${x.name}  ${x.yield.toFixed(3)}%  ${x.id}`)));
     bondSel.addEventListener("change", () => { state.bond = bondSel.value; state.legs = null; render(); });
-    const notional = el("input", { type: "number", step: "1000000", min: "0", value: state.notional, style: { width: "12em" }, "aria-label": "Notional" });
-    notional.addEventListener("change", () => { state.notional = Math.max(+notional.value || 0, 0); render(); });
+    const notional = el("input", { type: "number", step: "1", min: "0", value: +(state.notional / 1e6).toPrecision(12), style: { width: "8em" }, "aria-label": "Notional (mm)" });
+    notional.addEventListener("change", () => { state.notional = Math.max(+notional.value || 0, 0) * 1e6; render(); });
     const side = segmented([{ code: "1", label: "Long" }, { code: "-1", label: "Short" }], String(state.side), (v) => { state.side = +v; render(); });
     positionHost.replaceChildren(
       el("h2", {}, "Position"),
       el("div", { class: "stack" },
         el("label", { class: "row" }, "Bond ", bondSel),
-        el("div", { class: "row" }, el("label", {}, `Notional (${ccy}) `, notional), side),
+        el("div", { class: "row" }, el("label", {}, `Notional (${ccy}mm) `, notional), side),
         el("div", { class: "tiles" },
           tile("Price", b.price.toFixed(3), `accrued ${b.accrued.toFixed(3)} · settle ${mk.settle}`),
           tile("Yield", `${b.yield.toFixed(3)}%`, `as of ${mk.asOf}`),
