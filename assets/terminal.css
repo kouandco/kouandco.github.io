@@ -141,3 +141,7 @@ details.method li { margin: 3px 0; }
   main { padding: 10px 12px 28px; }
   .topbar .clock { margin-left: 0; }
 }
+
+/* ---- dense tables (BLOT curve risk) ---- */
+table.compact th, table.compact td { padding: 3px 5px; }
+table.compact th .unit { display: block; font-size: 10.5px; }

@@ -116,11 +116,13 @@ export async function loadUniverse(prefix = "") {
   const asOf = parseDate(curvesRaw.asOf);
   const dfs = Object.fromEntries(Object.entries(curvesRaw.curves).map(([k, v]) => [k, baseCurve(asOf, v)]));
   const spot = addBusinessDays(asOf, 2);
-  // Today's par rate (%), annuity and maturity of a spot-starting swap of `years` (or to a given end date).
-  const swap = (key, years, end) => {
+  // Today's par rate (%), annuity (PV today) and maturity of a swap of `years` from spot, or from `begin`
+  // (a forward start) to a given `end` date.
+  const swap = (key, years, end, begin) => {
     const ix = SWAP_INDEX[key], disc = dfs[ix.disc], proj = dfs[ix.proj];
-    const e = end ?? addMonths(spot, Math.round(12 * years));
-    const start = e <= spot ? e : spot;
+    const s0 = begin && begin > spot ? begin : spot;
+    const e = end ?? addMonths(s0, Math.round(12 * years));
+    const start = e <= s0 ? e : s0;
     const ann = annuityOf(disc, start, e, ix.fixM, ix.fixDc);
     const d0 = disc(start);
     const flt = periods(start, e, ix.fltM).reduce((a, [s, t]) => a + (proj(s) / proj(t) - 1) * disc(t) / d0, 0);
@@ -166,12 +168,13 @@ export function legNow(U, leg) {
     };
   }
   const ix = SWAP_INDEX[leg.id];
-  const s = U.swap(leg.id, leg.tenor);
+  // A swap is either `tenor` years from spot or runs to a `maturity` date, optionally forward-starting on `start`.
+  const s = leg.maturity ? U.swap(leg.id, null, parseDate(leg.maturity), leg.start ? parseDate(leg.start) : null) : U.swap(leg.id, leg.tenor);
   const unit = s.annuity / 1e4;                    // per 1 notional
   const notional = leg.qtyMode === "dv01" ? Math.round(Math.abs(leg.qty) / unit / 1e5) * 1e5 : Math.abs(leg.qty);
   const fixed = leg.fixed ?? s.rate;
   return {
-    ccy: ix.ccy, market: leg.id, label: `${leg.id} ${leg.tenor}Y`, sub: `fixed ${fixed.toFixed(4)}%`, maturity: iso(s.end), t: s.t,
+    ccy: ix.ccy, market: leg.id, label: leg.maturity ? `${leg.id} ${leg.start ? `${leg.start} → ` : ""}${leg.maturity}` : `${leg.id} ${leg.tenor}Y`, sub: `fixed ${fixed.toFixed(4)}%`, maturity: iso(s.end), t: s.t,
     level: s.rate, levelUnit: "%", price: null, unitDv01: unit * 1e6, unitLabel: "per 1mm", notional,
     dv01: leg.side * notional * unit, mv: (leg.side * notional * (fixed - s.rate) * s.annuity) / 100, fixed,
   };
@@ -300,11 +303,20 @@ async function irsHistory(U, leg, start, prefix) {
     const [a, ra] = pts[j], [b, rb] = pts[j + 1];
     return ra + ((rb - ra) * (T - a)) / (b - a);
   };
-  const idx = h.dates.map((d, i) => i).filter((i) => h.dates[i] >= start && parAt(i, leg.tenor) != null);
+  // Residual maturity at each date: fixed tenor from the trade date, or to the swap's maturity date. A forward start
+  // is treated as spot (the par rate to the maturity date).
+  const mat = leg.maturity ? parseDate(leg.maturity) : null;
+  const T0 = (i) => (mat ? yearsBetween(parseDate(h.dates[i]), mat) : leg.tenor);
+  let idx = h.dates.map((d, i) => i).filter((i) => h.dates[i] >= start && T0(i) > 0 && parAt(i, T0(i)) != null);
+  // Interpolate on the tenors archived on every date of the window, so a day with fewer tenors (the archive
+  // grew from 2/5/10/30Y to 1–30Y) does not change the interpolation and create a jump.
+  const common = tenors.filter((n) => idx.every((i) => h.series[`${leg.id} ${n}Y`][i] != null));
+  if (common.length >= 2) { tenors.length = 0; tenors.push(...common); idx = idx.filter((i) => parAt(i, T0(i)) != null); }
   if (!idx.length) return { rows: [], note: `swap history starts ${h.dates[0]} (archived daily since then)` };
   const d0 = parseDate(h.dates[idx[0]]);
-  const K = leg.fixed ?? parAt(idx[0], leg.tenor);
-  const a0 = parAnnuity(K, leg.tenor);
+  const Tstart = T0(idx[0]);
+  const K = leg.fixed ?? parAt(idx[0], Tstart);
+  const a0 = parAnnuity(K, Tstart);
   const notional = leg.qtyMode === "dv01" ? Math.round(Math.abs(leg.qty) / (a0 / 1e4) / 1e5) * 1e5 : Math.abs(leg.qty);
   const flt = U.floatRate(leg.id);
   return {
@@ -312,7 +324,7 @@ async function irsHistory(U, leg, start, prefix) {
     note: "Floating leg accrues at today's fixing; MTM from archived par rates at the residual maturity",
     rows: idx.map((i) => {
       const el = (parseDate(h.dates[i]) - d0) / DAY;
-      const T = leg.tenor - el / 365.25, par = parAt(i, T), A = parAnnuity(par, T);
+      const T = Tstart - el / 365.25, par = parAt(i, T), A = parAnnuity(par, T);
       return { date: h.dates[i], level: par, dv01: (leg.side * notional * A) / 1e4,
         pnl: (leg.side * notional * ((K - par) * A + (K - flt) * (el / 360))) / 100 };
     }),
