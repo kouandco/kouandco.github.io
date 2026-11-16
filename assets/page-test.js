@@ -1,6 +1,7 @@
 import { $, COLORS, MARKETS, el, fmt, frame, plot, showError } from "./common.js";
 import { repoAt } from "./bond.js";
 import { IRS_TENORS, SIDES, SWAP_INDEX, TYPES, addDays, iso, legHistory, legNow, loadUniverse } from "./positions.js";
+import { tradeBuilder } from "./tradebuilder.js";
 
 frame("TEST");
 const app = $("#app");
@@ -10,7 +11,7 @@ const MAX_LEGS = 5;
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY) ?? "null"); } catch { return null; } };
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(trades)); } catch { /* storage unavailable */ } };
 
-let U, trades, sel = 0, token = 0;
+let U, trades, sel = 0, token = 0, builder = null;   // builder: the open "New trade from template" panel
 const results = new Map();   // trade id -> computed backtest
 const pending = new Set();   // trade ids being backtested in the background
 
@@ -92,7 +93,21 @@ function renderList() {
   });
   listBox.replaceChildren(
     el("div", { class: "table-wrap" }, el("table", {}, el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: i < 2 || i === 3 ? "l" : "" }, h)))), el("tbody", {}, rows))),
+    builder,
     el("div", { class: "row", style: { marginTop: "6px" } },
+      el("button", { class: "btn", onclick: () => {
+        builder = builder ? null : tradeBuilder(U, {
+          createLabel: "Create trade",
+          onCreate: ({ legs, weights, name }) => {
+            // Bond legs get the market's 1-month repo and a 2% haircut, as on a new trade.
+            const withRepo = legs.map((l) => (l.type === "bond" ? { ...l, repo: +repoAt(U.markets[l.market].repo.points, 30 / 365).toFixed(3), haircut: 2 } : l));
+            trades.push({ ...newTrade(trades.length + 1), name, legs: withRepo, weights });
+            sel = trades.length - 1; builder = null; renderAll();
+          },
+          onCancel: () => { builder = null; renderList(); },
+        });
+        renderList();
+      } }, builder ? "Close template" : "+ New trade from template"),
       el("button", { class: "btn", onclick: () => { trades.push(newTrade(trades.length + 1)); sel = trades.length - 1; renderAll(); } }, "+ New trade"),
       el("button", { class: "btn", onclick: () => { const c = structuredClone(trades[sel]); c.id = Math.random().toString(36).slice(2, 9); c.name += " (copy)"; trades.push(c); sel = trades.length - 1; renderAll(); } }, "Duplicate"),
       el("button", { class: "btn", onclick: () => { if (trades.length > 1 && confirm(`Delete ${trades[sel].name}?`)) { results.delete(trades[sel].id); trades.splice(sel, 1); sel = 0; renderAll(); } } }, "Delete"),
@@ -145,7 +160,8 @@ function renderLegs(t) {
       }
       if (leg.type === "fut") return select(leg, "id", Object.values(U.futs).map((f) => ({ v: f.code, label: `${f.code} ${f.expiry} · ${f.price.toFixed(3)}` })));
       return el("span", { class: "row", style: { gap: "4px" } }, select(leg, "id", Object.keys(SWAP_INDEX).map((k) => ({ v: k, label: k }))),
-        select(leg, "tenor", IRS_TENORS.map((y) => ({ v: y, label: `${y}Y` })), { numeric: true }));
+        leg.maturity ? el("span", { class: "muted", title: "Swap to a date (from a trade template)" }, `${leg.start ? `${leg.start} → ` : "to "}${leg.maturity}`)
+          : select(leg, "tenor", IRS_TENORS.map((y) => ({ v: y, label: `${y}Y` })), { numeric: true }));
     };
     const typeSel = select(leg, "type", TYPES.map((x) => ({ v: x.code, label: x.label })), {
       onchange: () => { t.legs[i] = defaultLeg(leg.type, leg.market ?? "DE"); },
