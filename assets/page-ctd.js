@@ -83,6 +83,11 @@ function start(contracts, markets) {
   const repoEditorHost = el("div");
   const repoControls = el("div", { class: "row", style: { marginTop: "6px" } });
   const addHost = el("div", { class: "stack", style: { marginTop: "8px" } });
+  const basisCtl = el("div", { class: "row", style: { margin: "4px 0 8px" } });
+  const basisLines = el("div", { class: "plot" });
+  const basisLegs = el("div", { class: "plot" });
+  const basisNote = el("div", { class: "note" });
+  const basisSel = { id: null, side: "long" };   // bond (null = CTD) and side of the basis position
   const sweepProb = el("div", { class: "plot" });
   const sweepDV01 = el("div", { class: "plot" });
   const sweepNote = el("p", { class: "note" });
@@ -108,6 +113,9 @@ function start(contracts, markets) {
         el("h2", {}, "Distribution of the CTD yield at delivery, coloured by CTD"),
         payoff, switchesHost,
         el("h2", { style: { marginTop: "8px" } }, "CTD probability"), probs)),
+    el("section", { class: "panel", style: { marginTop: "10px" } },
+      el("h2", {}, "Basis payoff at delivery"), basisCtl,
+      el("div", { class: "grid cols-2" }, basisLines, basisLegs), basisNote),
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("h2", {}, "How the answer changes with today's yield level"),
       el("div", { class: "grid cols-2" }, sweepProb, sweepDV01), sweepNote),
@@ -309,6 +317,7 @@ function start(contracts, markets) {
     );
     renderRepoBox(model, model.bonds.find((b) => b.id === opts.ctdId)?.name ?? "CTD", draggingRepo);
     renderPayoff(model, res);
+    renderBasis(model, res, fut, mkt, unit, market.currency, contract);
     renderBasket(model, res, fut, mkt, unit);
     clearTimeout(sweepTimer);
     sweepTimer = setTimeout(() => renderSweep(contract, market, opts, cv, model), 250);
@@ -402,6 +411,83 @@ function start(contracts, markets) {
       marker: { color: ranked.map((r) => colourOf.get(r.i)) }, text: ranked.map((r) => `${(100 * r.p).toFixed(1)}%`), textposition: "outside",
       cliponaxis: false, hovertemplate: "%{y}: %{x:.1f}%<extra></extra>" }],
     { xaxis: { title: { text: "%" }, range: [0, 115] }, margin: { l: 140 }, showlegend: false }, Math.max(140, 34 * ranked.length + 60));
+  }
+
+  // P&L to delivery of a basis position per 100 nominal of bond j: long the bond financed in repo, short CF_j
+  // futures per 100 of bond at today's price F0, delivering or reversing at delivery when futures = min P/CF.
+  //   bond leg     = P_j(T) − forward clean_j                    (carry is in the forward price)
+  //   futures leg  = CF_j × (F0 − min_i P_i(T)/CF_i)
+  //   net          = CF_j × (P_j/CF_j − min P/CF) − net basis today   (≥ −net basis: a long put on the CTD switch)
+  // On the model's z line, so the x axis and the colours match the distribution chart above.
+  function renderBasis(model, res, fut, mkt, unit, ccy, contract) {
+    const { bonds } = model;
+    const c = ctdIndex(model);
+    let j = bonds.findIndex((b) => b.id === basisSel.id);
+    if (j < 0) j = c;
+    const sgn = basisSel.side === "long" ? 1 : -1;
+    const Z = 3.5, N = 141;
+    const zs = Array.from({ length: N }, (_, k) => -Z + (2 * Z * k) / (N - 1));
+    const xOf = (z) => (res.mu[c] + res.sd[c] * z) * 100;
+    const xs = zs.map(xOf);
+    const env = (z) => Math.min(...bonds.map((_, i) => res.ratio(i, z)));
+    const envs = zs.map(env);
+    const nb = (i) => bonds[i].fwdClean - fut * bonds[i].cf;                 // net basis today, price per 100
+    const net = (i, k) => sgn * (bonds[i].cf * (res.ratio(i, zs[k]) - envs[k]) - nb(i));
+    const m = unit.mult;
+    // Bonds with a realistic chance of being delivered, plus the chosen one.
+    const shown = bonds.map((_, i) => i).filter((i) => i === j || res.prob[i] >= 0.005 || i === c);
+    const sdBp = res.sd[c] * 100;
+    const density = { type: "scatter", mode: "lines", name: "Density", x: xs, y: zs.map((z) => phi(z) / sdBp), yaxis: "y2", fill: "tozeroy",
+      line: { color: "rgba(140,140,140,0.5)", width: 1 }, fillcolor: "rgba(140,140,140,0.12)", hoverinfo: "skip", showlegend: false };
+    const zero = [{ type: "line", x0: 0, x1: 1, xref: "paper", y0: 0, y1: 0, line: { color: "#5c5c5c", width: 1 } }];
+    const cuts = res.switches.filter((s) => Math.abs(s.z) < Z).map((s) => ({ type: "line", x0: xOf(s.z), x1: xOf(s.z), yref: "paper", y0: 0, y1: 1,
+      line: { color: "#ffd24d", dash: "dot", width: 1 } }));
+    const xaxis = { title: { text: `Change in CTD (${bonds[c].name}) yield to delivery, bp` } };
+    const y2 = { overlaying: "y", side: "right", showgrid: false, showticklabels: false, rangemode: "tozero", range: [0, (phi(0) / sdBp) * 3] };
+    const colourFor = (i, k) => colours.get(bonds[i].id) ?? COLORS[(k + 4) % COLORS.length];
+    plot(basisLines, [density, ...shown.map((i, k) => ({
+      type: "scatter", mode: "lines", name: `${bonds[i].name}`, x: xs, y: zs.map((_, q) => net(i, q) * m),
+      line: { color: colourFor(i, k), width: i === j ? 3 : 1.5, dash: i === j ? "solid" : "dot" },
+      hovertemplate: `${bonds[i].name}: %{y:.1f}${unit.label}<extra></extra>`,
+    }))], {
+      hovermode: "x unified", shapes: [...zero, ...cuts], legend: { y: -0.3 }, margin: { b: 90 }, xaxis,
+      yaxis: { title: { text: `${sgn > 0 ? "Long" : "Short"} basis P&L (${unit.label} per 100)` } }, yaxis2: y2,
+    }, 380);
+    const b = bonds[j];
+    const legBond = zs.map((z) => sgn * (b.cf * res.ratio(j, z) - b.fwdClean) * m);
+    const legFut = zs.map((z, k) => sgn * b.cf * (fut - envs[k]) * m);
+    const legNet = zs.map((_, k) => net(j, k) * m);
+    plot(basisLegs, [density,
+      { name: `Bond (${sgn > 0 ? "long" : "short"} ${b.name}, carry included)`, y: legBond, color: "#5fa8ff", w: 1.5 },
+      { name: `Futures (${sgn > 0 ? "short" : "long"} CF ${b.cf.toFixed(4)})`, y: legFut, color: "#ff5c5c", w: 1.5 },
+      { name: "Net basis position", y: legNet, color: "#ff9e1b", w: 3 },
+    ].map((t) => (t.type ? t : { type: "scatter", mode: "lines", name: t.name, x: xs, y: t.y, line: { color: t.color, width: t.w },
+      hovertemplate: `${t.name.split(" (")[0]}: %{y:.1f}${unit.label}<extra></extra>` })), {
+      hovermode: "x unified", shapes: [...zero, ...cuts], legend: { y: -0.3 }, margin: { b: 90 }, xaxis,
+      yaxis: { title: { text: `P&L to delivery (${unit.label} per 100)` } }, yaxis2: y2,
+    }, 380);
+    // Expected P&L = CF × (F0 − fair futures), since E[min P/CF] is the fair price.
+    const exp = sgn * (b.cf * (fut - res.fair)) * m;
+    const lo = Math.min(...legNet), hi = Math.max(...legNet);
+    const per10 = (x) => `${x < 0 ? "−" : "+"}${ccy}${fmt.int(Math.abs((x / m) * 1e5))}`;                    // per 10mm nominal: price per 100 × 1e5
+    const futLots = Math.round((1e7 * b.cf) / contract.face);
+    basisCtl.replaceChildren(
+      el("span", { class: "amber" }, "Bond"),
+      el("select", { "aria-label": "Basis bond", onchange: (e) => { basisSel.id = e.target.value; recompute(); } },
+        bonds.map((x, i) => el("option", { value: x.id, selected: i === j }, `${i === c ? "◆ " : ""}${x.name} · CTD ${fmt.pct(res.prob[i], 0)}`))),
+      el("span", { class: "amber" }, "Position"),
+      segmented([{ code: "long", label: "Long basis (buy bond, sell futures)" }, { code: "short", label: "Short basis (sell bond, buy futures)" }],
+        basisSel.side, (v) => { basisSel.side = v; recompute(); }));
+    basisNote.replaceChildren(
+      el("div", {}, `${b.name}: net basis today ${fmt.n(nb(j) * m, 1)}${unit.label} (gross ${fmt.n((b.clean - fut * b.cf) * m, 1)} − carry ${fmt.n(b.carry * m, 1)}) at futures ${priceText(mcode, fut)}${mkt ? " (market)" : " (model fair)"}. `
+        + `Expected P&L to delivery ${fmt.s(exp, 1)}${unit.label}; range over ±3.5 sd ${fmt.s(lo, 1)} to ${fmt.s(hi, 1)}${unit.label}. `
+        + `Per ${ccy}10mm of bond (${fmt.int(futLots)} contracts): expected ${per10(exp)}, worst ${per10(lo)}.`),
+      el("div", {}, sgn > 0
+        ? "Long basis = long the delivery option: the most it loses is today's net basis, if the bond is still CTD at delivery; it gains when yields move far enough for another bond to become cheapest. "
+          + "For a bond other than the CTD the floor is its delivery basis, which is above zero unless it becomes CTD."
+        : "Short basis = short the delivery option: it earns the net basis if the bond is CTD at delivery and loses when the CTD switches away from it."),
+      el("div", {}, "Left: net P&L for each likely deliverable (chosen bond solid). Right: the chosen bond's two legs. Futures hedge = CF per 100 of bond, held to delivery (no re-hedging, "
+        + "so the legs show the duration mismatch once the CTD switches). Grey: distribution of the CTD yield; yellow lines: CTD switch points. Drift, vol, repo and curve edits apply."));
   }
 
   const basketTable = dataTable([
@@ -600,5 +686,6 @@ function methodNote() {
       el("li", {}, "Curve anchor (Eurex markets): on each contract's latest EFP day, a deliverable's clean price = futures VWAP × CF + its EFP gross basis VWAP (as on the EURX page). "
         + "Those bonds take the implied yield; other bonds and the generic curve points move by the lot-weighted shift of each contract, interpolated by maturity and flat beyond. "
         + "Gross basis is then the EURX VWAP for traded bonds, and net basis = gross basis − carry is the output. The Bond Monitor uses the same net basis."),
+      el("li", {}, "Basis payoff: P&L to delivery of long bond (financed at its repo) and short CF futures per 100 nominal, at today's market futures price (model fair price when there is none). At delivery the futures equals the lowest P/CF, so the position is worth CF × (P/CF − min P/CF) and costs today's net basis. Expected P&L = CF × (futures − fair futures), so a futures trading rich to fair makes the long basis cheap."),
       el("li", {}, "Beta: regression of each bond's daily yield change on the fitted curve's change at its maturity over 3 months (clipped to 0.5–1.5).")));
 }

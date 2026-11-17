@@ -1,5 +1,5 @@
 import { $, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
-import { parseDate, yieldFromPrice } from "./bond.js";
+import { parseDate, pricer, yieldFromPrice } from "./bond.js";
 import { prepare } from "./futures.js";
 
 frame("EURX");
@@ -60,11 +60,23 @@ function twoMeans(values) {
   return { lo, hi, cut: (lo + hi) / 2, split: hi - lo >= 8 };
 }
 
+const ISSUER = { AT: "Austria", BE: "Belgium", DE: "Germany", DK: "Denmark", ES: "Spain", EU: "EU", FI: "Finland", FR: "France",
+  GR: "Greece", IE: "Ireland", IT: "Italy", NL: "Netherlands", PT: "Portugal", SK: "Slovakia", BB: "Bloomberg id" };
+// Cash leg settles T+2 business days.
+function settleOf(t) {
+  const d = parseDate(t.slice(0, 10));
+  for (let n = 0; n < 2;) { d.setUTCDate(d.getUTCDate() + 1); if (d.getUTCDay() % 6) n++; }
+  return d;
+}
+
 function start(trades, contracts, markets) {
+  // Every bond the page has static data for (coupon, maturity), across the three markets.
+  const statics = new Map();
+  for (const m of Object.values(markets)) for (const b of m.bonds) statics.set(b.id, { ...b, freq: m.freq });
   const state = {
     code: hashParam("c", "RX", CODES),
     tab: hashParam("t", "efp", ["efp", "efs"]),
-    bond: "CTD", view: "Waterfall", efsType: "Matched", efsLeg: "Lower",
+    bond: hashParam("b", "CTD"), measure: hashParam("m", "basis", ["basis", "spread"]), view: "Waterfall", efsType: "Matched", efsLeg: "Lower",
   };
   const header = el("div");
   const body = el("div");
@@ -80,12 +92,12 @@ function start(trades, contracts, markets) {
   }
 
   function render() {
-    setHash({ c: state.code, t: state.tab });
+    setHash({ c: state.code, t: state.tab, b: state.bond, m: state.measure });
     const { contract, bonds } = ranked();
     const [ctd1, ctd2] = bonds;
     header.replaceChildren(
       el("div", { class: "row", style: { marginBottom: "6px" } },
-        segmented(CODES.map((k) => ({ code: k, label: k })), state.code, (k) => { state.code = k; render(); }),
+        segmented(CODES.map((k) => ({ code: k, label: k })), state.code, (k) => { state.code = k; state.bond = "CTD"; render(); }),
         el("span", { class: "muted small" }, `${contract.name} ${contract.expiry} · trade data updated ${trades.updated} · times as published by Eurex`)),
       el("nav", { class: "tabs subtabs" },
         el("button", { class: state.tab === "efp" ? "active" : "", onclick: () => { state.tab = "efp"; render(); } }, "Basis trades (EFP)"),
@@ -99,24 +111,109 @@ function start(trades, contracts, markets) {
       el("span", { class: "row" }, el("span", { class: "amber" }, label), segmented(opts, state[key], (v) => { state[key] = v; render(); }))));
   }
 
+  // Static and futures-relative view of one bond: deliverable (gross basis), known bond (yield spread to the
+  // futures-implied CTD yield) or a bond without static data (cash price only).
+  function describe(isin, bonds, ctd1) {
+    const rank = bonds.findIndex((b) => b.id === isin);
+    const deliv = rank >= 0 ? bonds[rank] : null;
+    const st = statics.get(isin);
+    const role = rank === 0 ? "CTD" : rank === 1 ? "2nd CTD" : deliv ? `deliverable #${rank + 1}` : "not deliverable";
+    const issuer = ISSUER[isin.slice(0, 2)] ?? isin.slice(0, 2);
+    const name = st?.name ?? `${issuer} ${isin}`;
+    const yieldOf = st ? (r) => {
+      const p = pricer(st.coupon, parseDate(st.maturity), settleOf(r.t), st.freq);
+      return yieldFromPrice(p.price, r.cash);
+    } : null;
+    const futYield = (r) => yieldFromPrice(ctd1.price, r.f * ctd1.cf);
+    return { isin, rank, deliv, st, role, name, short: st?.name ?? issuer, yieldOf, futYield };
+  }
+
+  function measureOf(info) {
+    if (info.deliv && state.measure === "basis") return { key: "basis", unit: "c", label: "Gross basis", floors: [25, 2] };
+    if (info.yieldOf) return { key: "spread", unit: "bp", label: "Yield spread to futures", floors: [40, 3] };
+    return { key: "price", unit: "pts", label: "Cash price", floors: [3, 0.4] };
+  }
+
+  function valued(rs, info, m) {
+    return rs.map((r) => {
+      if (m.key === "basis") return { ...r, v: (r.cash - r.f * info.deliv.cf) * 100 };
+      if (m.key === "price") return { ...r, v: r.cash };
+      const y = info.yieldOf(r), fy = info.futYield(r);
+      return { ...r, y, fy, v: (y - fy) * 100 };
+    });
+  }
+
   function efp(contract, ctd1, ctd2) {
-    const bond = state.bond === "CTD" || !ctd2 ? ctd1 : ctd2;
-    const gross = grossSplit(trades.efp.filter((r) => r.c === state.code && r.x === contract.expiry && r.isin === bond.id)
-      .map((r) => ({ ...r, v: (r.cash - r.f * bond.cf) * 100 })), 25);
-    const local = localSplit(gross.kept, 2);
+    const { bonds } = ranked();
+    const all = trades.efp.filter((r) => r.c === state.code && r.x === contract.expiry);
+    const byIsin = new Map();
+    for (const r of all) (byIsin.get(r.isin) ?? byIsin.set(r.isin, []).get(r.isin)).push(r);
+    const isin = state.bond === "CTD" ? ctd1.id : state.bond === "2nd" && ctd2 ? ctd2.id : byIsin.has(state.bond) || bonds.some((b) => b.id === state.bond) ? state.bond : ctd1.id;
+    const info = describe(isin, bonds, ctd1);
+    const m = measureOf(info);
+    const gross = grossSplit(valued(byIsin.get(isin) ?? [], info, m), m.floors[0]);
+    const local = localSplit(gross.kept, m.floors[1]);
     const rows = withVwap(local.kept);
     const dropped = [...gross.dropped, ...local.dropped];
+    const d = m.key === "price" ? 3 : 1;
+    const pick = (v) => { state.bond = v === ctd1.id ? "CTD" : ctd2 && v === ctd2.id ? "2nd" : v; render(); };
+    const lotsOf = (id) => (byIsin.get(id) ?? []).reduce((s, r) => s + r.q, 0);
+    const activity = (id) => `(${fmt.int(byIsin.get(id)?.length ?? 0)} trades, ${fmt.int(lotsOf(id))} lots)`;
+    const options = [...byIsin.keys()].map((id) => describe(id, bonds, ctd1));
+    const order = (o) => (o.rank >= 0 ? o.rank : 100);
+    options.sort((x, y) => order(x) - order(y) || lotsOf(y.isin) - lotsOf(x.isin));
+    const select = el("select", { "aria-label": "Bond", onchange: (e) => pick(e.target.value) },
+      [el("optgroup", { label: "Deliverable" }, bonds.map((b, k) => el("option", { value: b.id, selected: b.id === isin },
+        `${k === 0 ? "CTD · " : k === 1 ? "2nd · " : ""}${b.name} ${activity(b.id)}`))),
+       el("optgroup", { label: "Other bonds traded against this contract" }, options.filter((o) => o.rank < 0).map((o) =>
+         el("option", { value: o.isin, selected: o.isin === isin }, `${o.name} ${activity(o.isin)}`)))]);
+    const cols = [["Time", (r) => r.t.replace("T", " ")], ["Lots", (r) => fmt.int(r.q)], ["Futures", (r) => r.f.toFixed(3)], ["Cash", (r) => r.cash.toFixed(4)]];
+    if (m.key === "spread") cols.push(["Bond yield", (r) => `${r.y.toFixed(3)}%`], ["Futures-implied CTD yield", (r) => `${r.fy.toFixed(3)}%`]);
+    cols.push([`${m.label} (${m.unit})`, (r) => r.v.toFixed(d)], [`Day VWAP (${m.unit})`, (r) => (r.outlier ? "–" : r.vwap.toFixed(d))]);
+    const note = m.key === "basis"
+      ? `${info.name} (${isin}), ${info.role}, CF ${info.deliv.cf.toFixed(6)}. Gross basis = cash price − futures × CF, in cents (0.01 points).`
+      : m.key === "spread"
+        ? `${info.name} (${isin}), ${info.role}. Yield spread = the bond's yield at the EFP cash price (settling T+2) − the CTD yield implied by the futures price (${ctd1.name}, futures × CF ${ctd1.cf.toFixed(6)} as its forward price at delivery), in bp. This is the level at which the bond was swapped against the futures.`
+        : `${info.name}: no coupon or maturity on file for this bond (the page holds German, French and Italian government bonds only), so only the EFP cash price is shown.`;
     return [
       controls([
         ["Bond", [{ code: "CTD", label: `CTD: ${ctd1.name}` }, ...(ctd2 ? [{ code: "2nd", label: `2nd CTD: ${ctd2.name}` }] : [])], "bond"],
+        ...(info.deliv && info.yieldOf ? [["Measure", [{ code: "basis", label: "Gross basis" }, { code: "spread", label: "Yield spread" }], "measure"]] : []),
         ["View", [{ code: "Waterfall", label: "Waterfall" }, { code: "Bubbles", label: "Bubbles" }], "view"]]),
-      el("p", { class: "note" }, `${bond.name} (${bond.id}), CF ${bond.cf.toFixed(6)}. Gross basis = cash price − futures × CF, in cents (0.01 points).`),
-      tiles(rows, "c", 1),
-      el("section", { class: "panel" }, el("h2", {}, "All trades: gross basis, daily VWAP (resets each morning) and lots"), chart(rows, "c"), outlierNote(dropped.length)),
-      tradeTable(withOutliers(rows, dropped), [
-        ["Time", (r) => r.t.replace("T", " ")], ["Lots", (r) => fmt.int(r.q)], ["Futures", (r) => r.f.toFixed(3)],
-        ["Cash", (r) => r.cash.toFixed(4)], ["Gross basis (c)", (r) => r.v.toFixed(1)], ["Day VWAP (c)", (r) => (r.outlier ? "–" : r.vwap.toFixed(1))]]),
+      el("div", { class: "row", style: { marginBottom: "8px" } }, el("span", { class: "amber" }, "Any bond"), select),
+      el("p", { class: "note" }, note),
+      tiles(rows, m.unit, d),
+      el("section", { class: "panel" }, el("h2", {}, `All trades: ${m.label.toLowerCase()}, daily VWAP (resets each morning) and lots`), chart(rows, m.unit), outlierNote(dropped.length)),
+      tradeTable(withOutliers(rows, dropped), cols),
+      bondSummary(byIsin, bonds, ctd1, isin, pick),
     ];
+  }
+
+  // Every bond swapped against the contract: activity and the latest level, click to chart.
+  function bondSummary(byIsin, bonds, ctd1, current, pick) {
+    const lastDay = trades.efp.reduce((x, r) => (r.t > x ? r.t : x), "").slice(0, 10);
+    const rows = [...byIsin].map(([id, rs]) => {
+      const info = describe(id, bonds, ctd1);
+      const last = rs[rs.length - 1];
+      const spread = info.yieldOf ? (info.yieldOf(last) - info.futYield(last)) * 100 : null;
+      const today = rs.filter((r) => r.t.startsWith(lastDay));
+      return { id, info, n: rs.length, lots: rs.reduce((s, r) => s + r.q, 0), todayLots: today.reduce((s, r) => s + r.q, 0), last, spread,
+        basis: info.deliv ? (last.cash - last.f * info.deliv.cf) * 100 : null };
+    }).sort((a, b) => b.lots - a.lots);
+    return el("section", { class: "panel", style: { marginTop: "10px" } },
+      el("h2", {}, `Bonds traded against ${state.code} ${rows.length ? `(${rows.length})` : ""}`),
+      el("div", { class: "table-wrap", style: { maxHeight: "420px" } }, el("table", {},
+        el("thead", {}, el("tr", {}, ["Bond", "ISIN", "Role", "Trades", "Lots", `Lots ${lastDay.slice(5)}`, "Last trade", "Last cash", "Gross basis (c)", "Spread to futures (bp)"]
+          .map((h, i) => el("th", { class: i < 3 ? "l" : "" }, h)))),
+        el("tbody", {}, rows.map((r) => el("tr", { class: r.id === current ? "hl" : "", style: { cursor: "pointer" }, onclick: () => pick(r.id) },
+          el("td", { class: "l" }, r.info.short), el("td", { class: "l muted" }, r.id),
+          el("td", { class: `l${r.info.rank >= 0 ? " amber" : " muted"}` }, r.info.role),
+          el("td", {}, fmt.int(r.n)), el("td", {}, fmt.int(r.lots)), el("td", {}, r.todayLots ? fmt.int(r.todayLots) : "–"),
+          el("td", {}, r.last.t.slice(5, 16).replace("T", " ")), el("td", {}, r.last.cash.toFixed(3)),
+          el("td", {}, r.basis == null ? "–" : r.basis.toFixed(1)), el("td", {}, r.spread == null ? "–" : r.spread.toFixed(1))))))),
+      el("p", { class: "note" }, "Click a row to chart it. Many EFPs are cross hedges: Dutch, Austrian, Belgian, Finnish, EU, French or Spanish bonds "
+        + "swapped against the German contracts, which have no conversion factor, so they are compared by yield spread to the futures-implied CTD yield. "
+        + "Bonds without static data on this site (non-German, -French or -Italian issuers) show the cash price only. Last trade's levels, not outlier-filtered."));
   }
 
   function efs(contract, ctd1) {
@@ -223,7 +320,7 @@ function methodNote() {
   return el("details", { class: "method panel" }, el("summary", {}, "Data and method"),
     el("ul", { class: "small" },
       el("li", {}, "EFP and EFS trades: Eurex EFP-Fin and EFS trade files. Eurex lists only about 20 trading days, so every file is archived and the archive extended each weekday at 10:00 London. Only the front contract is shown."),
-      el("li", {}, "CTD and 2nd CTD: deliverables ranked by forward price / conversion factor at the latest closing yields, as on the CTD page. EFPs against any other bond are excluded."),
+      el("li", {}, "CTD and 2nd CTD: deliverables ranked by forward price / conversion factor at the latest closing yields, as on the CTD page. Any other bond swapped against the contract can be picked from the list or the table of bonds traded; non-deliverable bonds are measured as yield spread to the futures-implied CTD yield (bond yield at the EFP cash price, settling T+2), or cash price when the site holds no static data for the bond."),
       el("li", {}, "Gross basis = cash price − futures × CF (cents). It includes carry to delivery, so it drifts down towards the net basis as delivery approaches."),
       el("li", {}, "Invoice spread = swap fixed rate − the CTD yield implied by the futures price, treating futures × CF as the CTD's forward price on the delivery date. Swap tenors in an EFS vary, so compare spreads across trades with similar tenors.")));
 }
