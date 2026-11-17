@@ -116,7 +116,11 @@ function start(contracts, auctions, markets) {
       const special = o.special ?? 0;
       const repo = gc + special / 100;
       const accrued = pricer(b.coupon, parseDate(b.maturity), settle, market.freq).accrued;
-      return { ...b, t, roll, extrap, gc, special, repo, carry: ((b.yield - repo) / 4) * 100, dirty: b.price + accrued, fitted: nsEval(fit, t) };
+      const dirty = b.price + accrued;
+      // At an unchanged yield the bond earns its yield on the dirty price (coupon + pull to par) and pays repo on it:
+      // carry = (yield − repo) × dirty × horizon, per 100 nominal; ÷ DV01 turns it into the yield move that would offset it.
+      const carryPx = ((b.yield - repo) / 100) * dirty * HORIZON;
+      return { ...b, t, roll, extrap, gc, special, repo, carryPx, carry: carryPx / b.dv01, dirty, fitted: nsEval(fit, t) };
     });
     const byId = new Map(rows.map((r) => [r.id, r]));
     // The futures legs are the CTD page's: the curve anchored to futures and EFP basis, CTD financed at the
@@ -182,7 +186,7 @@ function start(contracts, auctions, markets) {
       { key: "isin", label: "ISIN", fmt: (r) => r.id, left: true },
       { key: "vol", label: "Vol 3m", unit: "bp", fmt: (r) => (r.vol == null ? "–" : r.vol.toFixed(0)), value: (r) => r.vol,
         title: "Realised volatility of daily yield changes over the last 3 months, annualised (bp per year)" },
-      num("carry", "Carry 3m", "bp", 1, "(yield − repo) / 4"),
+      num("carry", "Carry 3m", "bp", 1, "(yield − repo) × dirty price × 0.25 / DV01: the yield rise that would wipe out 3 months of carry"),
       { ...num("roll", "Roll 3m", "bp", 1, "Fall in yield along the issue type's fitted curve as maturity shortens by 3 months"),
         cls: (r) => (r.extrap ? "extrap" : signClass(r.roll, 0.05)),
         tip: (r) => (r.extrap ? "Extrapolated: the curve is rolled below the shortest bond of this type" : null) },
@@ -243,7 +247,7 @@ function start(contracts, auctions, markets) {
     crNote.textContent = hedged
       ? "After a DV01-neutral futures hedge (weights as in the table): carry and roll minus the hedge CTDs', and the hedge net basis " +
         "turned into bp of the bond's yield (net basis cost / bond DV01; negative = cost). Positive = gain."
-      : "Outright: carry = (yield − repo) / 4; roll down along the issue type's fitted curve. Positive = gain. Same bonds as the table below (its filters apply).";
+      : "Outright: carry = (yield − repo) × dirty × 0.25 / DV01, in bp of yield; roll down along the issue type's fitted curve. Positive = gain. Same bonds as the table below (its filters apply).";
   }
 
   const count = el("span", { class: "muted" });
@@ -342,7 +346,7 @@ function methodNote() {
     el("ul", { class: "small" },
       el("li", {}, "Universe: nominal fixed-coupon government bonds (no inflation-linked, floating, strips or retail issues); bills excluded. UST: TreasuryDirect end-of-day prices; Bunds: Bundesbank; OATs and BTPs: Borsa Italiana closing prices. Lines more than 40bp off the fitted curve or not quoted in the past week are left out."),
       el("li", {}, "Realised 3m vol: standard deviation of daily yield changes over the last 63 trading days, annualised (× √252), in bp. Daily changes beyond 4 robust standard deviations are clipped so a stale or off-market close does not dominate an illiquid line."),
-      el("li", {}, "Carry 3m = (yield − repo) / 4, in bp. Repo = GC + special premium; GC is the 3-month point of the repo curve, a proxy built from SOFR and Treasury bills (US) or €STR and the ECB AAA government curve (euro), editable."),
+      el("li", {}, "Carry 3m, in bp of the bond's yield: (yield − repo) × dirty price × 0.25 / DV01. Held at an unchanged yield the bond earns its yield on the dirty price (coupon plus pull to par) and pays repo on the same amount; dividing by DV01 expresses that as the rise in yield that would cancel it, so it adds directly to roll down. Repo = GC + special premium; GC is the 3-month point of the repo curve, a proxy built from SOFR and Treasury bills (US) or €STR and the ECB AAA government curve (euro), editable."),
       el("li", {}, "Roll 3m: a Nelson-Siegel curve is fitted separately to each issue type (e.g. 2y, 5y, 10y, 30y Treasuries; Schatz, Bobl, Bund, green Bunds; BTP; OAT). Assuming that curve is unchanged in 3 months, roll = curve(T) − curve(T − 0.25), in bp; positive means the yield falls."),
       el("li", {}, "Hedge: UST, Bund and BTP use a fly hedge across the two futures whose CTDs bracket the bond's maturity, split linearly by maturity; bonds beyond the shortest or longest CTD, and the CTDs themselves, use the nearest contract alone. OATs use the OAT future alone. Weights are shares of the bond's DV01."),
       el("li", {}, "Hedged carry and roll = bond − Σ weight × CTD (bp, so DV01-neutral). Hedge net basis = Σ weight × (bond DV01 / CTD DV01) × CTD net basis, in cents per 100 nominal of the bond: a short futures position pays away the net basis (the value of the delivery option) as delivery approaches. The front contract may deliver before the 3-month horizon."),
