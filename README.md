@@ -19,17 +19,6 @@ evening, US closes at night, and DTCC and overnight fixings the next morning (`.
 | `TEST.html` | Backtest of trades of up to 5 legs (bond, ASW, futures, IRS) from a start date: notional or DV01 sizing, repo and haircut, entry / target / stop / holding period; cash P&L, return on capital and on balance sheet. Trades kept in the browser (export / import JSON) |
 | `BLOT.html` | Portfolio key-rate risk (1–30Y) on the government curve, swap curve and ASW, plus futures gross basis per contract: ΔV for 1bp in one point with everything else unchanged |
 
-### Risk advisory pages (`/risk`, not linked from the homepage)
-
-| Page | What it shows |
-|------|---------------|
-| `risk/index.html` | Menu, par swap rates (SONIA, 6M Euribor, €STR, SOFR), forward curves, FX spot / vol / forwards |
-| `risk/HSWP.html` | Debt hedging strategy: amortising project loan (sculpted, annuity, linear, bullet), swap / cap / zero-cost collar / mix priced on the curves, simulated all-in cost, DSCR lock-up risk, MTM at ±100bp |
-| `risk/RFP.html` | Execution: mid of the amortising swap or cap, fair credit charge (CVA + capital), bank quotes vs mid, pro-rata or competitive allocation, checklist, transparency note |
-| `risk/FXHG.html` | Fund FX hedging: hedge ratio vs FX vol and carry, roll liquidity stress, fund IRR distribution and cumulative settlements |
-
-Their code is in `assets/risk/`; they read `data/curves.json` and `data/fx.json`.
-
 ## Data sources
 
 | Data | Source | Updated |
@@ -47,7 +36,6 @@ Their code is in `assets/risk/`; they read `data/curves.json` and `data/fx.json`
 | Eurex EFP and EFS trades | Eurex trading files (EFP-Fin, EFS) | daily |
 | Auctions | TreasuryDirect, Finanzagentur, MEF; France from AFT's standing calendar | daily |
 | Treasury futures positioning | CFTC Commitments of Traders, Traders in Financial Futures (futures only), publicreporting.cftc.gov | weekly: Tuesday positions, released Friday 15:30 New York |
-| FX reference rates (USD, GBP, JPY, CHF, SGD, AUD; AED from the USD peg) | ECB euro foreign exchange reference rates | daily |
 
 ## Layout
 

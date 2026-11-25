@@ -9,6 +9,27 @@ const load = () => { try { return JSON.parse(localStorage.getItem(KEY) ?? "null"
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(book)); } catch { /* storage unavailable */ } };
 
 let U, book, builder = null;   // builder: the open "Add trade" panel
+// Undo / redo: a snapshot of the book before every change (this session only, last 100).
+let undoStack = [], redoStack = [], lastSnap = null;
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(lastSnap);
+  lastSnap = undoStack.pop();
+  book = JSON.parse(lastSnap);
+  render();
+}
+function redo() {
+  if (!redoStack.length) return;
+  undoStack.push(lastSnap);
+  lastSnap = redoStack.pop();
+  book = JSON.parse(lastSnap);
+  render();
+}
+document.addEventListener("keydown", (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || /INPUT|SELECT|TEXTAREA/.test(document.activeElement?.tagName ?? "")) return;
+  e.preventDefault();
+  if (e.shiftKey) redo(); else undo();
+});
 
 // Risk basis: two independent curves per currency; the third is implied (ASW ≈ govt yield − swap rate).
 const BASES = [
@@ -87,6 +108,13 @@ function select(obj, key, options, { numeric = false, onchange } = {}) {
 
 function render() {
   book = regroup(book);
+  const snap = JSON.stringify(book);
+  if (lastSnap !== null && snap !== lastSnap) {
+    undoStack.push(lastSnap);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+  }
+  lastSnap = snap;
   save();
   const pos = book.map((leg) => ({ leg, now: legNow(U, leg) }));
 
@@ -110,7 +138,7 @@ function render() {
     else add(swap, ix, ccy, t, -D);
   };
   for (const { leg, now } of pos) {
-    if (!now) continue;
+    if (!now || leg.off) continue;     // excluded from the risk (the "Risk" box unticked)
     if (leg.type === "bond") bondRisk(now.market, now.ccy, now.t, now.dv01);
     else if (leg.type === "asw") { bondRisk(now.market, now.ccy, now.t, now.dv01); swapRisk(now.swapIndex, now.ccy, now.t, now.swapDv01); }
     else if (leg.type === "fut") {
@@ -125,8 +153,8 @@ function render() {
   // ---- positions table
   posBox.replaceChildren(
     el("div", { class: "table-wrap" }, el("table", {},
-      el("thead", {}, el("tr", {}, ["Type", "Market", "Security", "Side", "Size by", "Quantity", "Fixed %", "Level", "Maturity", "Size", "DV01", "Value", ""]
-        .map((h, i) => el("th", { class: i < 5 ? "l" : "" }, h)))),
+      el("thead", {}, el("tr", {}, ["Risk", "Type", "Market", "Security", "Side", "Size by", "Quantity", "Fixed %", "Level", "Maturity", "Size", "DV01", "Value", ""]
+        .map((h, i) => el("th", { class: i < 6 ? "l" : "", title: i === 0 ? "Include in the risk below (untick to leave it out without deleting it)" : null }, h)))),
       el("tbody", {}, pos.flatMap(({ leg, now }, i) => {
         const head = leg.trade && leg.trade !== book[i - 1]?.trade ? tradeRow(leg.trade, pos) : null;
         const ccy = now?.ccy ?? "";
@@ -137,8 +165,11 @@ function render() {
             : el("span", { class: "row", style: { gap: "4px" } }, select(leg, "id", Object.keys(SWAP_INDEX).map((k) => ({ v: k, label: k }))),
               leg.maturity ? el("span", { class: "muted", title: "Swap to a date (from a trade template)" }, `${leg.start ? `${leg.start} → ` : "to "}${leg.maturity}`)
                 : select(leg, "tenor", IRS_TENORS.map((y) => ({ v: y, label: `${y}Y` })), { numeric: true }));
-        return [head, el("tr", { class: leg.trade ? "in-trade" : null },
-          el("td", { class: "l", style: leg.trade ? { paddingLeft: "18px" } : null }, select(leg, "type", TYPES.map((x) => ({ v: x.code, label: x.label })), { onchange: () => { book[i] = { ...defaultLeg(leg.type, leg.market ?? "UST"), ...(leg.trade ? { trade: leg.trade } : {}) }; } })),
+        const inc = el("input", { type: "checkbox", checked: !leg.off || null, title: leg.off ? "Left out of the risk: tick to include" : "In the risk: untick to leave it out" });
+        inc.addEventListener("change", () => { if (inc.checked) delete leg.off; else leg.off = true; render(); });
+        return [head, el("tr", { class: leg.trade ? "in-trade" : null, style: leg.off ? { opacity: 0.45 } : null },
+          el("td", { class: "l", style: leg.trade ? { paddingLeft: "18px" } : null }, inc),
+          el("td", { class: "l" }, select(leg, "type", TYPES.map((x) => ({ v: x.code, label: x.label })), { onchange: () => { book[i] = { ...defaultLeg(leg.type, leg.market ?? "UST"), ...(leg.trade ? { trade: leg.trade } : {}) }; } })),
           el("td", { class: "l" }, leg.type === "bond" || leg.type === "asw"
             ? select(leg, "market", MARKETS.map((m) => ({ v: m.code, label: m.label })), { onchange: () => { leg.id = bondNear(leg.market, 10, leg.type === "asw"); } }) : "–"),
           el("td", { class: "l" }, security),
@@ -157,6 +188,8 @@ function render() {
       })))),
     builder ?? "",
     el("div", { class: "row", style: { marginTop: "6px" } },
+      el("button", { class: "btn", disabled: undoStack.length ? null : true, title: "Undo the last change (⌘Z / Ctrl+Z)", onclick: undo }, "↶ Undo"),
+      el("button", { class: "btn", disabled: redoStack.length ? null : true, title: "Redo (⇧⌘Z / Ctrl+Shift+Z)", onclick: redo }, "↷ Redo"),
       el("button", { class: "btn", onclick: () => {
         builder = builder ? null : tradeBuilder(U, {
           createLabel: "Add to portfolio",
@@ -174,9 +207,10 @@ function render() {
         render();
       } }, "Bundle singles"),
       el("button", { class: "btn", onclick: importTest, title: "Add every leg of the trades saved on TEST" }, "Add TEST trades"),
-      el("button", { class: "btn", onclick: () => { if (confirm("Replace the portfolio with the example?")) { book = sample(); render(); } } }, "Example"),
-      el("button", { class: "btn", onclick: () => { if (confirm("Remove every position?")) { book = []; render(); } } }, "Clear"),
-      el("span", { class: "muted small" }, "DV01: gain for a 1bp fall in rates. Value: dirty market value (bonds), MTM at today's par rate (swaps).")));
+      el("button", { class: "btn", title: "Replace the portfolio with the example (Undo brings yours back)", onclick: () => { book = sample(); render(); } }, "Example"),
+      el("button", { class: "btn", title: "Remove every position (Undo brings them back)", onclick: () => { book = []; render(); } }, "Clear"),
+      el("span", { class: "muted small" }, "DV01: gain for a 1bp fall in rates. Value: dirty market value (bonds), MTM at today's par rate (swaps). "
+        + "Unticked positions stay in the book but are left out of the risk below.")));
 
   // ---- totals by currency
   const byCcy = {};
@@ -276,13 +310,18 @@ function importTest() {
 function tradeRow(name, pos) {
   const legs = pos.filter((p) => p.leg.trade === name);
   const net = {};
-  for (const { now } of legs) if (now) { const c = (net[now.ccy] ??= { dv: 0, mv: 0 }); c.dv += now.dv01; c.mv += now.mv ?? 0; }
+  for (const { leg, now } of legs) if (now && !leg.off) { const c = (net[now.ccy] ??= { dv: 0, mv: 0 }); c.dv += now.dv01; c.mv += now.mv ?? 0; }
   const ccys = Object.keys(net);
+  const on = legs.filter((p) => !p.leg.off).length;
+  const inc = el("input", { type: "checkbox", checked: on > 0 || null, title: on ? "Untick to leave the whole trade out of the risk" : "Tick to include the whole trade" });
+  inc.indeterminate = on > 0 && on < legs.length;
+  inc.addEventListener("change", () => { book.forEach((l) => { if (l.trade === name) { if (inc.checked) delete l.off; else l.off = true; } }); render(); });
   const nameIn = el("input", { type: "text", value: name, style: { minWidth: "22em", fontWeight: "600" }, title: "Trade name" });
   nameIn.addEventListener("change", () => { const n = nameIn.value.trim() || name; const t = n === name ? name : uniqueTrade(n); book.forEach((l) => { if (l.trade === name) l.trade = t; }); render(); });
-  return el("tr", { class: "trade-row", style: { background: "rgba(255, 170, 0, 0.06)", borderTop: "1px solid #3a3a3a" } },
+  return el("tr", { class: "trade-row", style: { background: "rgba(255, 170, 0, 0.06)", borderTop: "1px solid #3a3a3a", ...(on ? {} : { opacity: 0.45 }) } },
+    el("td", { class: "l" }, inc),
     el("td", { class: "l", colspan: 10 }, el("span", { class: "row", style: { gap: "8px" } }, nameIn,
-      el("span", { class: "muted small" }, `${legs.length} leg${legs.length === 1 ? "" : "s"} · net`))),
+      el("span", { class: "muted small" }, `${legs.length} leg${legs.length === 1 ? "" : "s"}${on < legs.length ? ` · ${on} in the risk` : ""} · net`))),
     el("td", {}, ccys.map((c, k) => el("div", { class: net[c].dv >= 0 ? "pos" : "neg" }, fmt.ccy(c, net[c].dv)))),
     el("td", {}, ccys.map((c) => el("div", {}, net[c].mv ? fmt.ccy(c, net[c].mv) : "–"))),
     el("td", { style: { whiteSpace: "nowrap" } },

@@ -17,7 +17,6 @@ import curves
 import dtcc
 import eurex_trades
 import futures
-import fx
 import history
 import markets
 import spreads
@@ -37,7 +36,6 @@ STEPS = [
     ("Auctions", auctions.build),
     ("Policy pricing", wirp.build),
     ("GP history", history.build),
-    ("FX rates", fx.build),
     ("CFTC positioning", cftc.build),
 ]
 
