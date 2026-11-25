@@ -1,4 +1,4 @@
-import { $, COLORS, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
+import { $, COLORS, el, fmt, footnotes, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
 
 frame("DTCC");
 const app = $("#app");
@@ -121,7 +121,7 @@ function start(summary, spreads, otr, markets) {
   const body = el("div");
   app.append(
     el("div", { class: "page-title" }, el("h1", {}, "Swap Flow"),
-      el("span", { class: "muted" }, "interest rate swaps reported to the DTCC swap data repository, trade by trade")),
+      el("span", { class: "muted" }, "interest rate swaps reported to DTCC, trade by trade: USD SOFR, EUR 6M Euribor and €STR, GBP SONIA")),
     header, body, methodNote(summary));
 
   async function render() {
@@ -296,22 +296,22 @@ function start(summary, spreads, otr, markets) {
         el("span", { class: "row" }, el("span", { class: "amber" }, "Category"), segmented(CATS, state.cat, (v) => { state.cat = v; render(); })),
         el("span", { class: "row" }, el("span", { class: "amber" }, "Quantity"), segmented(MEASURES, state.measure, (v) => { state.measure = v; render(); }))),
       el("section", { class: "panel" }, el("h2", {}, `Per day: ${state.idx} ${state.measure === "q" ? "notional" : "DV01"} by ${CATS.find((c) => c.code === state.cat).label.toLowerCase()}, ${rangeList[0]} to ${rangeList.at(-1)}`),
-        dayNode, el("p", { class: "note" }, "Days follow Range at the top. Click a legend entry to hide a category, double-click to show it alone.")),
+        dayNode, footnotes("Days follow Range at the top.", "Click a legend entry to hide a category; double-click to show it alone.")),
       el("section", { class: "panel", style: { marginTop: "10px" } },
-        el("h2", {}, `Per hour: ${state.day} (bars) against the ${periodNote} (areas)`),
+        el("h2", {}, `Per hour: ${state.day} against the ${periodNote}`),
         el("div", { class: "row", style: { margin: "4px 0 6px" } },
           el("span", { class: "row" }, el("span", { class: "amber" }, "Bars: day"), daySel),
           el("span", { class: "row" }, el("span", { class: "amber" }, "Areas: period before it"), segmented(RANGES, state.period, (v) => { state.period = v; render(); }))),
         hourNode,
-        el("p", { class: "note" }, "London time of execution. Areas: the average day of the chosen period before the bar day, stacked in the same colours, "
-          + "so a bar above its area is a busier hour than usual.")),
+        footnotes("Bars: the chosen day, by London time of execution.",
+          "Areas: the average day of the chosen period before it, stacked in the same colours; a bar above its area is a busier hour than usual.")),
       tiles,
       el("section", { class: "panel" }, el("h2", {}, `${state.idx}: trades by tenor on ${state.day}`), table,
-        el("p", { class: "note" }, (state.group
-          ? "All trades, each in the bracket of the nearest key-rate tenor by its length (start to end). "
-          : "Only trades whose length is exactly a key-rate tenor; tick \"Group all trades into key-rate brackets\" to include broken dates and other tenors. ")
-          + "Spot VWAP: spot-starting trades of exactly that tenor at a market rate "
-          + "(no upfront payment, not post-priced), off-market prints dropped, weighted by notional. Click a row for its trades.")),
+        footnotes(state.group
+          ? "Rows: all trades, each in the bracket of the nearest key-rate tenor by its length (start to end)."
+          : "Rows: only trades whose length is exactly a key-rate tenor; tick \"Group all trades into key-rate brackets\" to include broken dates and other tenors.",
+          "Spot VWAP: spot-starting trades of exactly that tenor at a market rate (no upfront payment, not post-priced), off-market prints dropped, weighted by notional.",
+          "Click a row for its trades.")),
     ];
   }
 
@@ -505,17 +505,18 @@ function start(summary, spreads, otr, markets) {
       ["Flags", (r) => [r.pkg && "package", r.spr && "spread", r.upf && "upfront", r.pp && "post-priced", r.blk && "block", r.unc && "uncleared"].filter(Boolean).join(", ")],
     ];
     const notes = {
-      curve: "Curve trades: two legs of one package (same second and venue). Level = long leg rate − short leg rate in bp; size = the legs' average DV01. "
-        + "DTCC does not say who paid which leg, so a trade could be a steepener or a flattener.",
-      fly: "Flies: three legs of one package. Level = 2 × belly − wings in bp; size = the legs' average DV01. The side is not published.",
-      spread: "Swap spread trades: the swap leg of a package against a bond (the bond leg is not a swap, so it is not reported); level = the reported package spread in bp, "
-        + "checked against swap rate − the bond's yield that day (Treasury par yield for a whole-year swap): a spread of the opposite sign but the same size is flipped (reporters use both conventions), one more than 12bp away is dropped. "
-        + "USD: only swaps that mature on the same day as a Treasury. \"On-the-run\" = the Treasury on the run on the trade date (a new issue from a week before its issue date), so the history follows each new 10Y; "
-        + "other Treasuries matched on maturity are in the list; swaps ending on no Treasury's maturity (e.g. a plain 10-year swap) are left out. EUR / GBP: the bond maturing on the swap's end date, else the benchmark of a whole-year tenor.",
-      invoice: "Invoice swaps: forward swaps from a bond futures delivery date to a deliverable bond's maturity, traded against the futures. "
-        + "The contract comes from the delivery month (start date) and the bond's remaining life (CME: from the first day of the delivery month; Eurex: from the delivery day) within each contract's deliverable range. "
-        + "Invoice spread: the package spread, reported for about one invoice trade in ten (swap rate − futures-implied yield, bp); reporters use both signs and several scales, so each is checked against swap rate − the bond's yield that day "
-        + "(flipped when only the sign differs, dropped when more than 20bp away). Swap rate: every invoice trade.",
+      curve: ["Curve trades: two legs of one package (same second and venue). Level = long leg rate − short leg rate, bp; size = the legs' average DV01.",
+        "DTCC does not say who paid which leg, so a trade could be a steepener or a flattener."],
+      fly: ["Flies: three legs of one package. Level = 2 × belly − wings, bp; size = the legs' average DV01.", "The side is not published."],
+      spread: ["Swap spread trades: the swap leg of a package against a bond (the bond leg is not a swap, so it is not reported). Level = the reported package spread, bp.",
+        "Each spread is checked against swap rate − the bond's yield that day: flipped when only the sign differs (reporters use both conventions), dropped when more than 12bp away.",
+        "USD: only swaps maturing on the same day as a Treasury. On-the-run = the Treasury on the run on the trade date (a new issue from a week before it is issued), "
+          + "so the history follows each new issue; swaps ending on no Treasury's maturity are left out.",
+        "EUR / GBP: the bond maturing on the swap's end date, else the benchmark of a whole-year tenor."],
+      invoice: ["Invoice swaps: forward swaps from a futures delivery date to a deliverable bond's maturity, traded against the futures.",
+        "Contract: from the delivery month (start date) and the bond's remaining life within the contract's deliverable range (CME: from the first day of the delivery month; Eurex: from the delivery day).",
+        "Invoice spread: the package spread (swap rate − futures-implied yield, bp), reported for about one trade in ten; checked against swap rate − the bond's yield "
+          + "(flipped when only the sign differs, dropped when more than 20bp away). Swap rate: every invoice trade."],
     };
     return [
       controls([
@@ -525,17 +526,19 @@ function start(summary, spreads, otr, markets) {
         // Waterfall / bubbles only apply when every trade is drawn (not to the daily candles of long ranges).
         ...(rows.length > MAX_TRADES_CHART ? [] : [["View", [{ code: "Waterfall", label: "Waterfall" }, { code: "Bubbles", label: "Bubbles" }], "view"]])]),
       selector,
-      el("p", { class: "note" }, `${ccy} ${state.idx} ${subject}, ${state.start === "all" ? "any start" : START_LABEL[state.start].toLowerCase() + " starting"}: `
-        + `${valueLabel} of every trade in sequence, the day's running VWAP and ${packMode ? "DV01" : "notional"}. `
-        + (notes[type] ?? ((state.group ? "Lengths around the key rate are mixed (see Maturity). " : "")
-          + "Forward and IMM trades of one tenor start on different dates, so their rates are not like for like. "))
-        + (state.offMarket === "Exclude" ? " Trades with an upfront payment or post-priced are left out (their rate is not the market rate)." : "")),
+      footnotes(
+        `${ccy} ${state.idx} ${subject}, ${state.start === "all" ? "any start" : START_LABEL[state.start].toLowerCase() + " starting"}: `
+          + `${valueLabel} of every trade in sequence, the day's running VWAP (resets each day) and ${packMode ? "DV01" : "notional"}.`,
+        notes[type] ?? [state.group ? "Lengths around the key rate are mixed (see Maturity)." : null,
+          "Forward and IMM trades of one tenor start on different dates, so their rates are not like for like."],
+        state.offMarket === "Exclude" ? "Trades with an upfront payment or post-priced are left out: their rate is not the market rate." : null),
       tradeTiles(rows),
       rows.length > MAX_TRADES_CHART
-        ? el("section", { class: "panel" }, el("h2", {}, `Daily: VWAP, range of trades (open, high, low, last) and ${packMode ? "DV01" : "notional"}`), dailyChart(rows),
-          el("p", { class: "note" }, `${fmt.int(rows.length)} trades: too many to draw one by one, so each day is one candle (first, highest, lowest and last trade) with its VWAP. Pick a shorter range to draw every trade, as a waterfall or as bubbles.`))
-        : el("section", { class: "panel" }, el("h2", {}, `All trades: ${valueLabel}, daily VWAP (resets each day) and ${packMode ? "DV01" : "notional"}`), chart(rows),
-        dropped.length ? el("p", { class: "note" }, `${dropped.length} print${dropped.length > 1 ? "s" : ""} far from the series or that day's median ${dropped.length > 1 ? "are" : "is"} left out of the chart and VWAP, and marked in the table.`) : ""),
+        ? el("section", { class: "panel" }, el("h2", {}, `Daily: VWAP and range, with ${packMode ? "DV01" : "notional"}`), dailyChart(rows),
+          footnotes(`${fmt.int(rows.length)} trades: too many to draw one by one, so each day is one candle (first, highest, lowest and last trade) with its VWAP.`,
+            "Pick a shorter range to draw every trade, as a waterfall or as bubbles."))
+        : el("section", { class: "panel" }, el("h2", {}, `All trades: ${valueLabel} and ${packMode ? "DV01" : "notional"}`), chart(rows),
+        dropped.length ? footnotes(`${dropped.length} print${dropped.length > 1 ? "s" : ""} far from the series or that day's median ${dropped.length > 1 ? "are" : "is"} left out of the chart and VWAP, and greyed in the table.`) : ""),
       tradeTable([...rows, ...dropped.map((r) => ({ ...r, outlier: true }))].sort((a, b) => a.ms - b.ms || a.k - b.k), cols),
     ];
   }
@@ -662,16 +665,17 @@ function start(summary, spreads, otr, markets) {
           el("td", { class: off(r.diffSnap) }, r.snap == null ? "–" : fmt.s(r.diffSnap, 2)),
           el("td", { class: "l" }, gpLink([`S|${r.series}`, `D|${r.series}`, `=(B-A)*100|DTCC − Eurex ${r.series} bp`], "history")))))))
         : el("p", { class: "muted" }, "No day with both DTCC trades and Eurex curves yet."),
-      el("p", { class: "note" }, "Eurex par: spot-starting par swap rate from the Eurex Clearing end-of-day curves (the curves behind ASW, IRS, WIRP and TEST). "
-        + "DTCC VWAP: spot-starting trades of exactly that tenor at a market rate, off-market prints dropped. Eurex does not say when its curves are marked; "
-        + "over October–November 2026 trades sat closest to them in the two hours before 17:30 Frankfurt (11:30 New York) in USD, EUR and GBP, so that window is the like-for-like check. "
-        + "Red: more than 1bp apart there. Few trades in a window (EUR and GBP, as the repository only covers trades with a US party) make single points noisy."));
+      footnotes(
+        "Eurex par: spot-starting par swap rate from the Eurex Clearing end-of-day curves (the curves behind ASW, IRS, WIRP and TEST).",
+        "DTCC VWAP: spot-starting trades of exactly that tenor at a market rate, off-market prints dropped.",
+        "Snap window: the two hours before 17:30 Frankfurt (11:30 New York), where trades sat closest to the Eurex curves over Oct–Nov 2026; red = more than 1bp apart there.",
+        "EUR and GBP have few trades per window (the repository only covers trades with a US party), so single points are noisy."));
 
     const l = spreads.latest;
     const spreadPanel = el("section", { class: "panel", style: { marginTop: "10px" } },
       el("h2", {}, `USD swap spread: SOFR swap − Treasury par yield, ${spreads.ustAsOf}`),
       el("div", { class: "table-wrap" }, el("table", {},
-        el("thead", {}, el("tr", {}, ["Tenor", "UST par %", "Chg bp", "SOFR % (DTCC 14:30–16:30 NY)", "USD swap spread bp", "Chg bp", "As of", ""]
+        el("thead", {}, el("tr", {}, ["Tenor", "UST par %", "Chg bp", "SOFR %", "Spread bp", "Chg bp", "As of", ""]
           .map((h, i) => el("th", { class: i ? "" : "l" }, h)))),
         el("tbody", {}, l.map((r) => el("tr", {},
           el("td", { class: "l amber" }, `${r.tenor}Y`),
@@ -681,10 +685,11 @@ function start(summary, spreads, otr, markets) {
           el("td", { class: r.spread?.chg > 0 ? "pos" : r.spread?.chg < 0 ? "neg" : "" }, r.spread ? fmt.s(r.spread.chg, 1) : "–"),
           el("td", {}, r.spread?.date ?? "–"),
           el("td", { class: "l" }, gpLink([`SS|USD swap spread ${r.tenor}Y`], "history"))))))),
-      el("p", { class: "note" }, "Treasury par yields: US Treasury's daily par yield curve, read from bid-side quotes at about 15:30 New York. "
-        + "SOFR: notional-weighted average rate of spot-starting SOFR swaps of exactly that tenor reported to DTCC and executed 14:30–16:30 New York, the same time as the Treasury quotes "
-        + "(blank, or an earlier date, when none traded). Spread = SOFR − Treasury par yield, as quoted (annual act/360 vs semi-annual), negative when swaps yield less than Treasuries. "
-        + "Changes are from the previous day with data. Swap spread trades themselves (traded spread, bp) are on the Trades tab with Type = Swap spread."));
+      footnotes(
+        "UST par: US Treasury's daily par yield curve, from bid-side quotes at about 15:30 New York.",
+        "SOFR: notional-weighted rate of spot-starting SOFR swaps of exactly that tenor executed 14:30–16:30 New York, the same time as the Treasury quotes (blank, or an earlier date, when none traded).",
+        "Spread = SOFR − Treasury par yield as quoted (annual act/360 vs semi-annual); negative when swaps yield less than Treasuries. Changes: from the previous day with data.",
+        "Traded swap spreads themselves are on the Trades tab, Type = Swap spread."));
     return [checkPanel, spreadPanel];
   }
 

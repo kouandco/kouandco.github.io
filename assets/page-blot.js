@@ -1,4 +1,4 @@
-import { $, COLORS, MARKETS, el, fmt, frame, heat, plot, segmented, showError } from "./common.js";
+import { $, COLORS, el, fmt, footnotes, frame, heat, MARKETS, plot, segmented, showError } from "./common.js";
 import { ASW_INDEX, IRS_TENORS, KR, SIDES, SWAP_INDEX, TYPES, krWeights, legNow, loadUniverse } from "./positions.js";
 import { tradeBuilder } from "./tradebuilder.js";
 
@@ -76,15 +76,15 @@ const hedgeBox = el("div");
 const hedge = { mode: "irs", ccy: null, index: {} };   // hedge panel: instruments, currency, IRS index per currency
 
 app.append(
-  el("div", { class: "page-title" }, el("h1", {}, "Portfolio risk"),
-    el("span", { class: "muted" }, "value change for a 1bp rise in one point, everything else unchanged · portfolio saved in this browser")),
+  el("div", { class: "page-title" }, el("h1", {}, "Portfolio Risk"),
+    el("span", { class: "muted" }, "curve, spread and futures basis risk of a portfolio, with hedge suggestions · saved in this browser")),
   el("section", { class: "panel" }, el("h2", {}, "Positions"), posBox),
   el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Totals"), tiles),
-  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Curve risk: ΔV for +1bp at each point"), tables.curves),
+  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Curve risk: ΔV for +1bp"), tables.curves),
   el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
-    el("section", { class: "panel" }, el("h2", {}, "Bond futures gross basis: ΔV for +1 tick"), tables.basis),
-    el("section", { class: "panel" }, el("h2", {}, "Rate risk by bucket"), chart)),
-  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge: curve risk"), hedgeBox),
+    el("section", { class: "panel" }, el("h2", {}, "Futures basis risk: ΔV for +1 tick"), tables.basis),
+    el("section", { class: "panel" }, el("h2", {}, "Curve risk by bucket"), chart)),
+  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge suggestion"), hedgeBox),
   methodNote());
 
 loadUniverse().then((u) => { U = u; book = load() ?? sample(); render(); }).catch((e) => showError(app, e));
@@ -255,8 +255,12 @@ function render() {
       el("button", { class: "btn", onclick: importTest, title: "Add every leg of the trades saved on TEST" }, "Add TEST trades"),
       el("button", { class: "btn", title: "Replace the portfolio with the example (Undo brings yours back)", onclick: () => { book = sample(); render(); } }, "Example"),
       el("button", { class: "btn", title: "Remove every position (Undo brings them back)", onclick: () => { book = []; render(); } }, "Clear"),
-      el("span", { class: "muted small" }, "DV01: gain for a 1bp fall in rates. Value: dirty market value (bonds), MTM at today's par rate (swaps). "
-        + "Unticked positions stay in the book but are left out of the risk below.")));
+    ),
+    footnotes(
+      "Risk: untick a position or trade to keep it in the book but leave it out of every risk figure below.",
+      "Yrs: years to maturity (futures: to the CTD's maturity). DV01: gain for a 1bp fall in rates.",
+      "Value: dirty market value for bonds; mark-to-market at today's par rate for swaps.",
+      "Undo / Redo: every change this session (⌘Z, ⇧⌘Z)."));
 
   // ---- totals by currency
   const byCcy = {};
@@ -295,9 +299,10 @@ function render() {
     el("thead", {}, el("tr", {}, ["Contract", "CTD", "Tick", "ΔV"].map((h, i) => el("th", { class: i < 2 ? "l" : "" }, h)))),
     el("tbody", {}, bRows.map(([k, r]) => el("tr", {}, el("td", { class: "l" }, k), el("td", { class: "l" }, r.ctd), el("td", {}, r.tick),
       el("td", { class: Math.abs(r.dv) < 0.5 ? "" : r.dv > 0 ? "pos" : "neg" }, Math.abs(r.dv) < 0.5 ? "·" : fmt.ccy(r.ccy, r.dv))))))),
-    el("p", { class: "small muted", style: { margin: "6px 0 0" } }, "Gross basis = CTD price − futures × CF. +1 tick (1/32 UST, 0.01 Eurex) with the CTD's "
-      + "yield unchanged lowers the futures by tick / CF: ΔV = −lots × face / 100 × tick / CF. Bonds and IRS carry none; a CTD-vs-futures position "
-      + "(long bond, short futures) gains when the basis widens."));
+    footnotes(
+      "Gross basis = CTD price − futures × CF. +1 tick (1/32 UST, 0.01 Eurex), with the CTD's yield unchanged, lowers the futures by tick / CF: "
+        + "ΔV = −lots × face / 100 × tick / CF.",
+      "Only futures carry it. A long-bond, short-futures position gains when the basis widens."));
 
   // ---- chart: government + swap + ASW risk per bucket, one bar series per curve
   const series = [...Object.entries(govt).map(([k, r]) => [`${k} govt`, r]), ...Object.entries(swap).map(([k, r]) => [`${k} IRS`, r]), ...Object.entries(asw).map(([k, r]) => [`${k} ASW`, r])];
@@ -439,13 +444,13 @@ function renderHedge(pos, B, risk, BK) {
     el("div", { class: "grid cols-2", style: { alignItems: "start" } },
       el("div", {}, el("h2", {}, "Suggested hedge"), table, el("div", { class: "row", style: { marginTop: "6px" } }, add)),
       el("div", {}, el("h2", {}, "Risk: current, hedge, remaining"), riskTable)),
-    el("p", { class: "note" }, `Hedged on the buckets chosen above (${BK.code === "ctd" ? "futures CTD anchors" : "key rates"}). ` + (hedge.mode === "irs"
-      ? (BK.code === "ctd" ? "IRS: par swaps to each CTD's maturity, " : "IRS: one par swap at each key tenor with risk, ")
-        + "sized by least squares on the buckets (rounded to 1mm). Hedging bonds with IRS leaves ASW risk: the bonds' "
-        + "spread to swaps is no longer offset by anything."
-      : "Futures: lots from an exact least-squares fit of the key-rate risk, each contract's risk sitting at its CTD's maturity (DV01 per lot = "
-        + "CTD DV01 / CF), rounded to whole lots. The whole risk is hedged in one go; what is left cannot be reduced with these contracts. "
-        + "Futures add gross basis risk: +1 tick of basis lowers each contract by tick / CF.")));
+    footnotes(
+      `Buckets: as chosen for the curve risk above (${BK.code === "ctd" ? "futures CTD anchors" : "key rates"}).`,
+      hedge.mode === "irs"
+        ? (BK.code === "ctd" ? "IRS: par swaps to each CTD's maturity" : "IRS: one par swap at each key tenor") + ", sized by least squares on the buckets and rounded to 1mm."
+        : "Futures: lots from a least-squares fit on the buckets, each contract's risk at its CTD's maturity (DV01 per lot = CTD DV01 / CF), rounded to whole lots.",
+      "The whole risk is hedged in one go: what is left cannot be reduced with these instruments, so a second run suggests nothing.",
+      hedge.mode === "irs" ? "Hedging bonds with IRS leaves ASW risk: the bonds' spread to swaps is no longer offset." : "Futures add gross basis risk: +1 tick lowers each contract by tick / CF."));
 }
 
 // One table, maturities down the side: a column per curve, grouped into government yield, swap and ASW, then
@@ -488,7 +493,7 @@ function curveTable(groups, B, BK) {
       + "beyond the ends), so each row is the risk that contract hedges. USD and GBP use the Treasury contracts' CTDs (TU, FV, TY, UXY, US, WN), "
       + "EUR the German ones (DU, OE, RX, UB). Hover a row for the CTDs and their maturities."] : []),
   ];
-  return el("div", {}, table, el("ol", { class: "small muted", style: { margin: "6px 0 0", paddingLeft: "18px" } }, notes.map((n) => el("li", {}, n))));
+  return el("div", {}, table, el("ol", { class: "footnotes" }, notes.map((n) => el("li", {}, n))));
 }
 
 function importTest() {

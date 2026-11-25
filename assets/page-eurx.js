@@ -1,4 +1,4 @@
-import { $, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
+import { $, el, fmt, footnotes, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
 import { parseDate, pricer, yieldFromPrice } from "./bond.js";
 import { prepare } from "./futures.js";
 
@@ -183,7 +183,7 @@ function start(trades, contracts, markets) {
       el("div", { class: "row", style: { marginBottom: "8px" } }, el("span", { class: "amber" }, "Any bond"), select),
       el("p", { class: "note" }, note),
       tiles(rows, m.unit, d),
-      el("section", { class: "panel" }, el("h2", {}, `All trades: ${m.label.toLowerCase()}, daily VWAP (resets each morning) and lots`), chart(rows, m.unit), outlierNote(dropped.length)),
+      el("section", { class: "panel" }, el("h2", {}, `All trades: ${m.label.toLowerCase()} and lots`), chart(rows, m.unit), footnotes("Line: the day's running VWAP, reset each morning.", outlierText(dropped.length))),
       tradeTable(withOutliers(rows, dropped), cols),
       bondSummary(byIsin, bonds, ctd1, isin, pick),
     ];
@@ -203,7 +203,7 @@ function start(trades, contracts, markets) {
     return el("section", { class: "panel", style: { marginTop: "10px" } },
       el("h2", {}, `Bonds traded against ${state.code} ${rows.length ? `(${rows.length})` : ""}`),
       el("div", { class: "table-wrap", style: { maxHeight: "420px" } }, el("table", {},
-        el("thead", {}, el("tr", {}, ["Bond", "ISIN", "Role", "Trades", "Lots", `Lots ${lastDay.slice(5)}`, "Last trade", "Last cash", "Gross basis (c)", "Spread to futures (bp)"]
+        el("thead", {}, el("tr", {}, ["Bond", "ISIN", "Role", "Trades", "Lots", `Lots ${lastDay.slice(5)}`, "Last trade", "Last cash", "Gross basis c", "Spread bp"]
           .map((h, i) => el("th", { class: i < 3 ? "l" : "" }, h)))),
         el("tbody", {}, rows.map((r) => el("tr", { class: r.id === current ? "hl" : "", style: { cursor: "pointer" }, onclick: () => pick(r.id) },
           el("td", { class: "l" }, r.info.short), el("td", { class: "l muted" }, r.id),
@@ -211,9 +211,11 @@ function start(trades, contracts, markets) {
           el("td", {}, fmt.int(r.n)), el("td", {}, fmt.int(r.lots)), el("td", {}, r.todayLots ? fmt.int(r.todayLots) : "–"),
           el("td", {}, r.last.t.slice(5, 16).replace("T", " ")), el("td", {}, r.last.cash.toFixed(3)),
           el("td", {}, r.basis == null ? "–" : r.basis.toFixed(1)), el("td", {}, r.spread == null ? "–" : r.spread.toFixed(1))))))),
-      el("p", { class: "note" }, "Click a row to chart it. Many EFPs are cross hedges: Dutch, Austrian, Belgian, Finnish, EU, French or Spanish bonds "
-        + "swapped against the German contracts, which have no conversion factor, so they are compared by yield spread to the futures-implied CTD yield. "
-        + "Bonds without static data on this site (non-German, -French or -Italian issuers) show the cash price only. Last trade's levels, not outlier-filtered."));
+      footnotes("Click a row to chart it.",
+        "Many EFPs are cross hedges: Dutch, Austrian, Belgian, Finnish, EU, French or Spanish bonds swapped against the German contracts. They have no conversion factor, "
+          + "so they are compared by yield spread to the futures-implied CTD yield.",
+        "Bonds without static data here (issuers other than Germany, France and Italy) show the cash price only.",
+        "Gross basis and spread: the last trade's levels, not outlier-filtered."));
   }
 
   function efs(contract, ctd1) {
@@ -244,7 +246,7 @@ function start(trades, contracts, markets) {
           + (clusters.split ? ` Matched trades fall in two clusters (centres ${clusters.lo.toFixed(1)} and ${clusters.hi.toFixed(1)} bp), most likely €STR OIS and 6m Euribor swaps; Eurex's file does not say which, so the split is inferred.` : "")
         : "EFS against swaps not matched to the CTD (other start or end dates, e.g. spot-starting 10-year swaps): swap rate − futures-implied CTD yield, in bp. The tenor mismatch adds curve slope, so compare like tenors."),
       tiles(rows, "bp", 1),
-      el("section", { class: "panel" }, el("h2", {}, "All trades: invoice spread, daily VWAP (resets each morning) and lots"), chart(rows, "bp"), outlierNote(dropped.length)),
+      el("section", { class: "panel" }, el("h2", {}, "All trades: invoice spread and lots"), chart(rows, "bp"), footnotes("Line: the day's running VWAP, reset each morning.", outlierText(dropped.length))),
       tradeTable(withOutliers(rows, dropped), [
         ["Time", (r) => r.t.replace("T", " ")], ["Lots", (r) => fmt.int(r.q)], ["Futures", (r) => r.f.toFixed(3)],
         ["Implied CTD yield", (r) => `${r.y.toFixed(3)}%`], ["Swap rate", (r) => `${r.rate.toFixed(4)}%`],
@@ -301,8 +303,8 @@ function start(trades, contracts, markets) {
     return node;
   }
 
-  function outlierNote(n) {
-    return n ? el("p", { class: "note" }, `${n} print${n > 1 ? "s" : ""} flagged as outliers (far from the series or that day's median) ${n > 1 ? "are" : "is"} left out of the chart and VWAP, and marked in the table below.`) : "";
+  function outlierText(n) {
+    return n ? `${n} print${n > 1 ? "s" : ""} far from the series or that day's median ${n > 1 ? "are" : "is"} left out of the chart and VWAP, and marked in the table below.` : null;
   }
 
   function tradeTable(rows, cols) {

@@ -1,4 +1,4 @@
-import { $, COLORS, dataTable, el, fmt, frame, loadJSON, plot, segmented, showError } from "./common.js";
+import { $, COLORS, dataTable, el, fmt, footnotes, frame, loadJSON, plot, segmented, showError } from "./common.js";
 import { linear } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
 
@@ -385,9 +385,11 @@ function start(data) {
     nodesHost.replaceChildren(table.node,
       el("div", { class: "row", style: { marginTop: "6px" } },
         el("button", { class: "btn", onclick: () => { state.target[state.idx] = null; solveCurve(); render(); } }, "Reset to market"),
-        el("span", { class: "note" }, `Spot-starting par rates of the standard ${idx.label} swap: fixed ${FREQS.find((f) => f.m === idx.fixed[0]).label.toLowerCase()} ${idx.fixed[1]}, `
-          + `floating ${FREQS.find((f) => f.m === idx.float[0]).label.toLowerCase()} ${idx.float[1]}; projection ${idx.proj}, discounting ${idx.disc}. `
-          + "Blue dots: market. Editing a rate moves both curves by a zero-rate shift solved so that every tenor reprices to its rate.")));
+      ),
+      footnotes(
+        `Spot-starting par rates of the standard ${idx.label} swap: fixed ${FREQS.find((f) => f.m === idx.fixed[0]).label.toLowerCase()} ${idx.fixed[1]}, `
+          + `floating ${FREQS.find((f) => f.m === idx.float[0]).label.toLowerCase()} ${idx.float[1]}; projection ${idx.proj}, discounting ${idx.disc}.`,
+        "Blue dots: market. Editing a rate moves both curves by a zero-rate shift solved so that every tenor reprices to its rate."));
   }
 
   function renderForwards(p) {
@@ -413,8 +415,9 @@ function start(data) {
         el("td", {}, r.tau.toFixed(5)), el("td", {}, (r.rate * 100).toFixed(4)),
         el("td", { class: r.cash < 0 ? "neg" : "pos" }, fmt.ccy(ccy, r.cash)), el("td", {}, r.df.toFixed(6)),
         el("td", { class: r.pvN < 0 ? "neg" : "pos" }, fmt.ccy(ccy, r.pvN))))))),
-      el("p", { class: "note" }, `Signed from your side (${state.pay ? "paying fixed, receiving floating" : "receiving fixed, paying floating"}). `
-        + "Floating rates are forwards from the projection curve plus the spread; payment dates are the accrual end dates, rolled modified following over weekends."));
+      footnotes(`Signed from your side (${state.pay ? "paying fixed, receiving floating" : "receiving fixed, paying floating"}).`,
+        "Floating rates: forwards from the projection curve plus the spread.",
+        "Payment dates: the accrual end dates, rolled modified following over weekends."));
   }
 
   render();

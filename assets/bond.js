@@ -47,7 +47,7 @@ export function yieldFromPrice(price, target, lo = -5, hi = 30) {
 }
 
 // Coupons paid after `from` up to and including `to`.
-function couponsBetween(maturity, from, to, freq) {
+export function couponsBetween(maturity, from, to, freq) {
   const out = [];
   const step = 12 / freq;
   for (let k = 0; ; k++) {

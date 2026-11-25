@@ -170,12 +170,15 @@ export function heat(x, scale) {
 
 // columns: {key, label, unit, fmt(row), value(row) (for sorting), cls(row), bg(row), left, title,
 //           edit: {get(row), set(row, value), step}}
-export function dataTable(columns, { sortKey = null, sortAsc = true, rowClass, onRowClick, groups } = {}) {
+// A column with hide() returning true is left out (e.g. a column that does not apply to the current market).
+export function dataTable(allColumns, { sortKey = null, sortAsc = true, rowClass, onRowClick, groups } = {}) {
   const wrap = el("div", { class: "table-wrap tall" });
   let rows = [];
   let key = sortKey;
   let asc = sortAsc;
+  let columns = allColumns;
   const render = () => {
+    columns = allColumns.filter((c) => !c.hide?.());
     const col = columns.find((c) => c.key === key);
     const sorted = col ? [...rows].sort((a, b) => {
       const va = (col.value ?? col.fmt)(a), vb = (col.value ?? col.fmt)(b);
@@ -238,4 +241,14 @@ export function layout(extra = {}) {
 export function plot(node, data, extra = {}, height = 360) {
   window.Plotly.react(node, data, layout({ height, ...extra }),
     { displaylogo: false, responsive: true, scrollZoom: true, modeBarButtonsToRemove: ["lasso2d", "select2d"] });
+}
+
+// Numbered footnotes under a panel or table: one short item each (null / false items are skipped). Use with
+// sup(n) markers in titles or headers.
+export function footnotes(...items) {
+  const list = items.flat().filter(Boolean);
+  return list.length ? el("ol", { class: "footnotes" }, list.map((t) => el("li", {}, t))) : null;
+}
+export function sup(n) {
+  return n ? el("sup", { class: "fn" }, String(n)) : null;
 }

@@ -1,4 +1,4 @@
-import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, heat, loadJSON, plot, segmented, setHash, showError, signClass } from "./common.js";
+import { $, COLORS, dataTable, el, fmt, footnotes, frame, hashParam, heat, loadJSON, MARKETS, plot, segmented, setHash, showError, signClass } from "./common.js";
 import { nsEval, parseDate, pricer, repoAt, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
 import { FUTURES_BY_MARKET, anchorMarket, contractSummary, hedgeWeights } from "./futures.js";
@@ -30,17 +30,17 @@ function start(contracts, auctions, markets) {
   const marketTabs = el("div");
   const chart = el("div", { class: "plot" });
   const repoHost = el("div");
-  const repoNote = el("p", { class: "note" });
+  const repoNote = el("div");
   const auctionHost = el("div");
   const hedgeHost = el("div");
   const crModeHost = el("div");
   const crChart = el("div", { class: "plot" });
-  const crNote = el("p", { class: "note" });
+  const crNote = el("div");
   const controls = el("div", { class: "row" });
   const tableHost = el("div");
-  const tableNote = el("p", { class: "note" });
+  const tableNote = el("div");
   app.append(
-    el("div", { class: "page-title" }, el("h1", {}, "Bond Monitor"), el("span", { class: "muted" }, "nominal government bonds: carry, roll down, repo and futures-hedged returns over 3 months")),
+    el("div", { class: "page-title" }, el("h1", {}, "Bond Monitor"), el("span", { class: "muted" }, "nominal government bonds: fitted curve, repo, carry and roll-down, auctions and futures hedges")),
     el("div", { style: { marginBottom: "8px" } }, marketTabs),
     el("div", { class: "grid cols-2" },
       el("section", { class: "panel" }, el("h2", {}, "Yields and fitted curve by issue type"), chart),
@@ -53,9 +53,9 @@ function start(contracts, auctions, markets) {
           } }, "Reset")),
         repoHost, repoNote)),
     el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Auctions and syndications: recent and upcoming"), auctionHost),
-    el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge futures (front contracts)"), hedgeHost),
+    el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Front futures contracts"), hedgeHost),
     el("section", { class: "panel", style: { marginTop: "10px" } },
-      el("div", { class: "row", style: { justifyContent: "space-between" } }, el("h2", {}, "Carry and roll down by maturity, 3 months"), crModeHost),
+      el("div", { class: "row", style: { justifyContent: "space-between" } }, el("h2", {}, "Carry and roll-down over 3 months"), crModeHost),
       crChart, crNote),
     el("section", { class: "panel", style: { marginTop: "10px" } }, controls, tableHost, tableNote),
     methodNote());
@@ -73,8 +73,10 @@ function start(contracts, auctions, markets) {
 
   function renderRepo(dragging = false) {
     repoEditor.update(shownRepo().map((p) => ({ x: p.t, y: p.rate, label: p.label })), [], { keepRange: dragging });
-    repoNote.textContent = `${markets[mcode].repo.source}${mcode === "UST" ? "" : " €STR stands in for S/N."} Drag any point; ` +
-      "the 3M point sets the GC column (each row can be overwritten). The futures' CTD repo, with the boxing option, is set on the CTD page.";
+    repoNote.replaceChildren(footnotes(
+      `Source: ${markets[mcode].repo.source}${mcode === "UST" ? "" : "; €STR stands in for S/N"}.`,
+      "Drag any point. The 3M point sets the GC column of the table below; each row can be overwritten.",
+      "The CTD's own repo to delivery, with the boxing option, is set on the CTD page."));
   }
 
   // ---- auctions and syndications
@@ -93,8 +95,10 @@ function start(contracts, auctions, markets) {
           el("td", {}, d.size ?? "–"), el("td", {}, d.result ?? "–"),
           el("td", { class: "l" }, d.link ? el("a", { href: d.link, target: "_blank", rel: "noopener" }, "official ↗") : "–")))))) :
         el("p", { class: "muted" }, "No auctions or syndications in the window."),
-      el("p", { class: "note" }, `Source: ${info.source} (`, info.calendar ? el("a", { href: info.calendar, target: "_blank", rel: "noopener" }, "calendar") : "–",
-        `). Last 3 weeks and next 6 weeks; sizes as announced (planned volume or offered range). Starred on the yield chart.`));
+      footnotes(
+        el("span", {}, `Source: ${info.source}`, info.calendar ? [" (", el("a", { href: info.calendar, target: "_blank", rel: "noopener" }, "calendar"), ")"] : null, "."),
+        "Last 3 weeks and next 6 weeks; sizes as announced (planned volume or offered range).",
+        "Starred on the yield chart."));
   }
 
   // ---- calculations
@@ -209,8 +213,10 @@ function start(contracts, auctions, markets) {
     tableHost.replaceChildren(table.node);
 
     count.textContent = `${shown.length} of ${rows.length} bonds · prices as of ${market.asOf} · GC 3M ${gc3m.toFixed(3)}%`;
-    tableNote.textContent = "Highlighted ◆ rows are the CTDs of the front futures contracts. Click a header to sort. GC and special are editable per bond (special: negative when the bond trades special in repo). " +
-      "Carry, roll and returns are over 3 months; returns are not annualised.";
+    tableNote.replaceChildren(footnotes(
+      "◆ rows: the CTDs of the front futures contracts. Click a header to sort.",
+      "GC and special are editable per bond; special is negative when the bond trades special in repo.",
+      "Carry, roll and returns are over 3 months, not annualised."));
   }
 
   // Stacked bars per bond at its maturity: outright carry and roll, or after the futures hedge with the net basis
@@ -244,10 +250,12 @@ function start(contracts, auctions, markets) {
       barmode: "relative", hovermode: "closest",
       xaxis: { title: { text: "Years to maturity" } }, yaxis: { title: { text: "bp over 3 months" }, zeroline: true },
     }, 340);
-    crNote.textContent = hedged
-      ? "After a DV01-neutral futures hedge (weights as in the table): carry and roll minus the hedge CTDs', and the hedge net basis " +
-        "turned into bp of the bond's yield (net basis cost / bond DV01; negative = cost). Positive = gain."
-      : "Outright: carry = (yield − repo) × dirty × 0.25 / DV01, in bp of yield; roll down along the issue type's fitted curve. Positive = gain. Same bonds as the table below (its filters apply).";
+    crNote.replaceChildren(footnotes(hedged
+      ? ["Hedged: after a DV01-neutral futures hedge (weights as in the table), carry and roll minus those of the hedge CTDs.",
+        "The hedge's net basis is turned into bp of the bond's yield: net basis cost ÷ bond DV01 (negative = cost).",
+        "Positive = gain. Same bonds as the table below (its filters apply)."]
+      : ["Outright: carry = (yield − repo) × dirty × 0.25 ÷ DV01, in bp of yield; roll-down along the issue type's fitted curve.",
+        "Positive = gain. Same bonds as the table below (its filters apply)."]));
   }
 
   const count = el("span", { class: "muted" });
@@ -284,10 +292,10 @@ function start(contracts, auctions, markets) {
         el("td", {}, l.futuresSource === "market" ? `EFP VWAP ${l.futuresDate}` : "model fair value"),
         el("td", {}, fmt.n(l.netBasis * 100, 1)), el("td", {}, fmt.n(l.fairNetBasis * 100, 1)),
         el("td", {}, fmt.pct(l.prob, 0)), el("td", {}, fmt.n(l.dv01, 0))))))),
-    el("p", { class: "note" }, mcode === "UST"
+    footnotes(mcode === "UST"
       ? "No free Treasury futures prices, so UST net basis is the model's fair value (the delivery option); see the CTD page."
-      : "Net basis as on the CTD page: the bond curve anchored to the futures VWAP and each deliverable's EFP gross basis VWAP, "
-        + "net basis = gross basis − carry at the repo proxy. Contracts without EFPs use the model's fair value."));
+      : ["Futures: Eurex EFP VWAP where trades exist; otherwise the model's fair value.",
+        "Net basis as on the CTD page: gross basis (from the EFP VWAP) − carry at the repo proxy."]));
   }
 
   function renderChart(rows, legs) {

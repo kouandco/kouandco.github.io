@@ -1,4 +1,4 @@
-import { $, COLORS, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
+import { $, COLORS, el, fmt, footnotes, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
 
 frame("WIRP");
 const app = $("#app");
@@ -141,10 +141,10 @@ function start(wirp, hist, policy) {
         tile(`${b.overnightName} fixing`, `${b.overnight.toFixed(3)}% (${b.fixingDate})`),
         tile(`${b.overnightName} priced to next meeting`, `${b.priced.toFixed(3)}%`),
         tile("Curve", `${b.curve} · Eurex Clearing`)),
-      el("section", { class: "panel" }, el("h2", {}, `${b.name}: policy rate over two years and the path priced ahead`), pathChart),
+      el("section", { class: "panel" }, el("h2", {}, `${b.name}: policy rate, last two years and priced path`), pathChart),
       el("section", { class: "panel" },
-        el("h2", {}, `Meeting by meeting: ${past.filter((d) => d.change).length} moves in the last ${past.length} meetings, then the path priced ahead`), table,
-        footnotes(noteNo, {
+        el("h2", {}, `Meeting by meeting: ${past.filter((d) => d.change).length} moves in the last ${past.length} meetings, then the priced path`), table,
+        meetingNotes(noteNo, {
           eff: "Eff.: the date a priced decision takes effect (the Fed: the day after; ECB: the following Wednesday; BoE: the same day). "
             + "Rows above Today are decided, below are priced by the OIS curve.",
           rate: "Rate: after the decision, from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate); priced rows: the implied rate.",
@@ -238,13 +238,14 @@ function dotPlot(dots, state, b, curveDate, rerender) {
       el("h2", {}, `FOMC dot plot: ${dayLabel(sep.date)}`),
       el("span", { class: "row", style: { gap: "8px" } }, pick, el("a", { href: sep.link, target: "_blank", rel: "noopener", class: "small" }, "SEP tables"))),
     el("div", { class: "grid cols-2" }, chart, el("div", {}, table,
-      el("p", { class: "note" }, "Each dot is one participant's projected midpoint of the federal funds target range (or target level) at the end of the year, "
-        + "rounded to the nearest 1/8 point. Median: the middle participant (the Fed's convention). OIS implied: today's priced rate after the last FOMC of "
-        + "that year, for comparison."))));
+      footnotes(
+        "Each dot: one participant's projected midpoint of the federal funds target range (or target level) at the end of the year, to the nearest 1/8 point.",
+        "Median: the middle participant (the Fed's convention).",
+        "OIS implied: today's priced rate after the last FOMC of that year, for comparison."))));
 }
 
-function footnotes(noteNo, text, extra) {
-  return el("ol", { class: "small muted", style: { margin: "6px 0 0", paddingLeft: "18px" } },
+function meetingNotes(noteNo, text, extra) {
+  return el("ol", { class: "footnotes" },
     Object.keys(noteNo).map((k) => el("li", {}, text[k])), extra ? el("li", { style: { listStyle: "none" } }, extra) : null);
 }
 

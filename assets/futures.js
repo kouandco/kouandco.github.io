@@ -24,7 +24,9 @@ export const basisUnit = (market) => (market === "UST" ? { mult: 32, label: "/32
 // Deliverables priced for delivery. `inputs` maps bond id -> {y, beta, cf} overrides; `repo` (%) is the GC rate
 // that finances every bond from settlement to delivery, and `repoById` (bond id -> %) a bond's own term repo
 // (the CTD's special or boxed rate).
-export function prepare(contract, market, { inputs = {}, repo, repoById = {} } = {}) {
+// anchorT: maturity (years) of the generic yield that drives every deliverable (betas = each bond's beta to it);
+// without it, each bond moves with the curve's drift and vol at its own maturity.
+export function prepare(contract, market, { inputs = {}, repo, repoById = {}, anchorT = null, betas = {} } = {}) {
   const settle = parseDate(market.settle);
   const delivery = parseDate(contract.delivery);
   const T = Math.max(yearsBetween(settle, delivery), 0);
@@ -41,14 +43,17 @@ export function prepare(contract, market, { inputs = {}, repo, repoById = {} } =
     const clean = spot.price(y);
     const repoRate = repoById[d.id] ?? r;
     const fwdClean = forwardPrice(bond, clean, settle, delivery, repoRate);
+    // Repo cost to delivery (price per 100): the forward price at the repo rate minus the one with no financing.
+    // carry = clean − forward clean = coupon income − repo cost.
+    const repoCost = fwdClean - forwardPrice(bond, clean, settle, delivery, 0);
     return {
       id: d.id, name: mb.name, coupon: d.coupon, maturity: d.maturity, t: yearsBetween(settle, bond.maturity),
-      y, beta: o.beta ?? mb.beta ?? 1, cf, clean, dv01: spot.dv01(y), repo: repoRate,
+      y, beta: o.beta ?? betas[d.id] ?? mb.beta ?? 1, cf, clean, dv01: spot.dv01(y), repo: repoRate,
       fwdClean, fwdYield: yieldFromPrice(atDelivery.price, fwdClean), price: atDelivery.price,
-      ratio0: fwdClean / cf, carry: clean - fwdClean,
+      ratio0: fwdClean / cf, carry: clean - fwdClean, repoCost,
     };
   });
-  return { T, repo: r, settle, delivery, bonds };
+  return { T, repo: r, settle, delivery, bonds, anchorT };
 }
 
 // Set a bond's yield so that its forward P/CF equals `target`.
@@ -69,8 +74,12 @@ export function evaluate(model, curve) {
   const { bonds, T } = model;
   if (!bonds.length) return null;
   const sq = Math.sqrt(T);
-  const mu = bonds.map((b) => (curve.drift(b.t) / 100) * T);
-  const sd = bonds.map((b) => (b.beta * curve.vol(b.t) / 100) * sq);
+  // One factor: the generic yield at the anchor maturity, z its standardised move to delivery; each deliverable
+  // moves by beta × that move (drift and vol read at the anchor). Without an anchor, at each bond's own maturity.
+  const tA = model.anchorT;
+  const muG = tA != null ? (curve.drift(tA) / 100) * T : null, sdG = tA != null ? (curve.vol(tA) / 100) * sq : null;
+  const mu = bonds.map((b) => (tA != null ? b.beta * muG : (curve.drift(b.t) / 100) * T));
+  const sd = bonds.map((b) => (tA != null ? b.beta * sdG : (b.beta * curve.vol(b.t) / 100) * sq));
   const n = Math.round((2 * Z_MAX) / STEP);
   const simpson = (f) => {
     let s = 0;
@@ -122,7 +131,7 @@ export function evaluate(model, curve) {
   for (let k = 0; k <= n; k++) fair += (k === 0 || k === n ? 1 : k % 2 ? 4 : 2) * env[k] * phi(zs[k]);
   fair *= STEP / 3;
   return {
-    prob, fair, zs, env, ctd, switches, mu, sd, ratio,
+    prob, fair, zs, env, ctd, switches, mu, sd, ratio, muG, sdG,
     nbFair: bonds.map((b) => b.fwdClean - fair * b.cf),
   };
 }

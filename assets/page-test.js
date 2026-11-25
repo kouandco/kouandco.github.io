@@ -1,4 +1,4 @@
-import { $, COLORS, MARKETS, el, fmt, frame, plot, showError } from "./common.js";
+import { $, COLORS, el, fmt, footnotes, frame, MARKETS, plot, showError } from "./common.js";
 import { repoAt } from "./bond.js";
 import { IRS_TENORS, SIDES, SWAP_INDEX, TYPES, addDays, iso, legHistory, legNow, loadUniverse } from "./positions.js";
 import { tradeBuilder } from "./tradebuilder.js";
@@ -19,8 +19,8 @@ const listBox = el("div"), setupBox = el("div"), legsBox = el("div"), tiles = el
 const charts = { pnl: el("div", { class: "plot" }), level: el("div", { class: "plot" }), ret: el("div", { class: "plot" }), all: el("div", { class: "plot" }) };
 
 app.append(
-  el("div", { class: "page-title" }, el("h1", {}, "Strategy backtest"),
-    el("span", { class: "muted" }, "bonds, ASW, futures and swaps, up to 5 legs · trades saved in this browser")),
+  el("div", { class: "page-title" }, el("h1", {}, "Strategy Backtest"),
+    el("span", { class: "muted" }, "trades of up to 5 legs in bonds, ASW, futures and swaps, from any start date · saved in this browser")),
   el("section", { class: "panel" }, el("h2", {}, "Trades"), listBox),
   el("div", { class: "grid hedge-layout", style: { marginTop: "10px" } },
     el("section", { class: "panel" }, el("h2", {}, "Trade set-up"), setupBox),
@@ -144,8 +144,9 @@ function renderSetup(t) {
     el("div", { class: "row" },
       input("Holding period (days)", t, "hold", { step: 1 }),
       input("Initial margin (bp of DV01)", t, "imBp", { step: 5, title: "Margin on futures and swaps, as a move in bp times the DV01" })),
-    el("p", { class: "note" }, "Level = Σ weight × leg level (legs table). One leg: its yield %, ASW bp, futures price or swap rate %. "
-      + "Several legs: all in bp (futures as the CTD yield they imply). A target above entry means the trade profits when the level rises.")));
+    footnotes("Level = Σ weight × leg level (legs table). One leg: its yield %, ASW bp, futures price or swap rate %.",
+      "Several legs: all in bp, futures as the CTD yield they imply.",
+      "A target above entry means the trade profits when the level rises.")));
 }
 
 function renderLegs(t) {

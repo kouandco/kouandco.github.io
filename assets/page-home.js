@@ -1,4 +1,4 @@
-import { $, MARKETS, PAGES, el, fmt, frame, loadJSON } from "./common.js";
+import { $, el, fmt, footnotes, frame, loadJSON, MARKETS, PAGES, sup } from "./common.js";
 
 frame("HOME");
 const app = $("#app");
@@ -22,7 +22,7 @@ const BLURB = {
 };
 
 app.append(
-  el("div", { class: "page-title" }, el("h1", {}, "Rates tools"), el("span", { class: "muted" }, "government bond futures and cash · data refreshed weekdays at 10:00, 19:00 and 23:30 London")),
+  el("div", { class: "page-title" }, el("h1", {}, "Rates Tools"), el("span", { class: "muted" }, "government bonds, futures and swaps · refreshed weekdays at 10:00, 19:00 and 23:30 London")),
   el("nav", { class: "menu", "aria-label": "Tools" }, PAGES.filter((p) => p.code !== "HOME").map((p) =>
     el("a", { href: p.href }, el("span", { class: "code" }, p.code), el("span", { class: "name" }, p.title), el("p", {}, BLURB[p.code])))));
 
@@ -73,10 +73,12 @@ Promise.all(MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))).then((l
   Promise.all(MARKETS.map((m) => loadJSON(`data/gp/${m.code}.json`))).then(render).catch((err) => console.warn("daily changes unavailable", err));
   snapshot.append(el("div", { class: "table-wrap" }, el("table", {},
     el("thead", {}, el("tr", {}, ["Market", "2Y %", "5Y %", "10Y %", "30Y %", "2s10s bp", "10s30s bp", "10Y vs Bund bp", "10Y ASW bp", "As of"]
-      .map((h, i) => el("th", { class: i ? "" : "l" }, h)))),
+      .map((h, i) => el("th", { class: i ? "" : "l" }, h, i === 1 ? sup(1) : i === 8 ? sup(3) : null)))),
     tbody)),
-  el("p", { class: "note" }, "Closing yield of the actual benchmark bond at each tenor. UST: the latest issue of each original term (on the run). "
-    + "Bunds: the latest Schatz and Bobl, the newest Bund in the 10-year window and the longest Bund. OATs and BTPs: the most recently issued line "
-    + "maturing in the tenor's window. Small figures: change in bp from the previous close of the same bond (each market on its own dates). ASW: par-par asset swap spread vs SOFR (UST) or 6M Euribor (euro area), positive when the bond yields more than swaps. "
-    + "History of every series is on GP."));
+  footnotes(
+    "Yields: closing yield of the benchmark bond at each tenor. UST: the on-the-run issue of each original term. Bunds: the latest Schatz and Bobl, "
+      + "the newest Bund in the 10-year window and the longest Bund. OATs and BTPs: the most recently issued line maturing in the tenor's window.",
+    "Small figures: change in bp from the previous close of the same bond, each market on its own dates; rising yields in red.",
+    "ASW: par-par asset swap spread against SOFR (UST) or 6M Euribor (euro area); positive when the bond yields more than swaps.",
+    "The history of every series is on GP."));
 }).catch((err) => snapshot.append(el("p", { class: "down" }, `Could not load data: ${err.message}`)));

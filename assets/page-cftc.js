@@ -1,4 +1,4 @@
-import { $, COLORS, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
+import { $, COLORS, el, fmt, footnotes, frame, hashParam, loadJSON, plot, segmented, setHash, showError } from "./common.js";
 import { contractSummary } from "./futures.js";
 
 frame("CFTC");
@@ -146,13 +146,14 @@ function start(data, dv01) {
         el("span", { class: "amber" }, "Range"), segmented(RANGES, state.range, (v) => { state.range = v; render(); })),
       tiles,
       el("section", { class: "panel" }, el("h2", {}, `Net positions, ${last}`), table,
-        el("p", { class: "note" }, `Each cell: net long (green) or short (red); below, the ${state.back}-week change and the percentile of that net position over the whole history since 2006 (p100: the longest ever, p0: the shortest). `
-          + "Click a column for its charts, a row for its long / short history.")),
+        footnotes("Each cell: net long (green) or short (red).",
+          `Below it: the ${state.back}-week change, and the percentile of that net position since 2006 (p100: the longest ever, p0: the shortest).`,
+          "Click a column for its charts, a row for its long / short history.")),
       el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
         el("section", { class: "panel" }, el("h2", {}, `Net by trader group: ${name}`), netNode),
-        el("section", { class: "panel" }, el("h2", {}, `Across the curve: net by contract, ${last} (bars) and ${prior} (ticks)`), curveNode)),
+        el("section", { class: "panel" }, el("h2", {}, `Across the curve: net by contract, ${last} vs ${prior}`), curveNode)),
       el("section", { class: "panel", style: { marginTop: "10px" } },
-        el("h2", {}, `${data.groups[g]}: gross long, gross short and net, ${name}`),
+        el("h2", {}, `${data.groups[g]}: long, short and net, ${name}`),
         el("div", { class: "row", style: { marginBottom: "4px" } }, el("span", { class: "amber" }, "Group"),
           segmented(groups.map((k) => ({ code: k, label: data.groups[k] })), state.group, (v) => { state.group = v; render(); })),
         grossNode));

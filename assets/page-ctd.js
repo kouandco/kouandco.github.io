@@ -1,7 +1,12 @@
-import { $, COLORS, MARKETS, dataTable, el, fmt, frame, hashParam, loadJSON, plot, segmented, setHash, showError, signClass } from "./common.js";
-import { Phi, linear, parseDate, phi, pricer, repoAt, yearsBetween } from "./bond.js";
+import { $, COLORS, dataTable, el, fmt, footnotes, frame, hashParam, loadJSON, MARKETS, plot, segmented, setHash, showError, signClass } from "./common.js";
+import { Phi, couponsBetween, linear, parseDate, phi, pricer, repoAt, yearsBetween } from "./bond.js";
 import { curveEditor } from "./curve-editor.js";
 import { FUTURES_BY_MARKET, anchorMarket, basisUnit, ctdIndex, curveDynamics, evaluate, marketFutures, oaDV01, prepare, sweep, yieldForRatio } from "./futures.js";
+
+// The generic yield each contract's probability analysis is anchored to (fitted-curve point, years): every
+// deliverable moves by its beta to it.
+const ANCHOR = { TU: 2, FV: 5, TY: 10, UXY: 10, US: 30, WN: 30, DU: 2, OE: 5, RX: 10, UB: 30, OAT: 10, BTS: 2, IK: 10 };
+const BETA_DAYS = 63;   // 3 months of daily changes
 
 frame("CTD");
 const app = $("#app");
@@ -26,8 +31,44 @@ function priceText(market, x) {
   return `${whole}-${String(rem >= 0.875 ? t + 1 : t).padStart(2, "0")}${frac}`;
 }
 
+
+// Each bond's beta to the generic yield: regression of its daily yield changes on the fitted curve's change at
+// the anchor point over the last 3 months (data/gp/<market>.json), clipped to 0.3-2.
+function anchorBetas(gp, tA) {
+  const g = gp.fit?.[String(tA)];
+  if (!g) return {};
+  const gAt = new Map(gp.fitDates.map((d, i) => [d, g[i]]));
+  const out = {};
+  for (const [id, ys] of Object.entries(gp.yield)) {
+    const pairs = [];
+    for (let i = 1; i < gp.dates.length; i++) {
+      const y0 = ys[i - 1], y1 = ys[i], g0 = gAt.get(gp.dates[i - 1]), g1 = gAt.get(gp.dates[i]);
+      if (y0 != null && y1 != null && g0 != null && g1 != null) pairs.push([g1 - g0, y1 - y0]);
+    }
+    const p = pairs.slice(-BETA_DAYS);
+    if (p.length < 20) continue;
+    const mx = p.reduce((a, [x]) => a + x, 0) / p.length, my = p.reduce((a, [, y]) => a + y, 0) / p.length;
+    const vx = p.reduce((a, [x]) => a + (x - mx) ** 2, 0);
+    if (!vx) continue;
+    const b = p.reduce((a, [x, y]) => a + (x - mx) * (y - my), 0) / vx;
+    out[id] = Math.min(2, Math.max(0.3, b));
+  }
+  return out;
+}
+
 function start(contracts, markets) {
   const codes = MARKETS.map((m) => m.code);
+  const gpCache = {};       // market -> data/gp history (loaded on first use)
+  const betaCache = {};     // market|anchor -> {bond id: beta}
+  const anchorT = () => ANCHOR[ccode] ?? 10;
+  function betasNow(then) {
+    const m = mcode, tA = anchorT(), key = `${m}|${tA}`;
+    if (betaCache[key]) return betaCache[key];
+    (gpCache[m] ??= loadJSON(`data/gp/${m}.json`)).then((gp) => {
+      if (!betaCache[key]) { betaCache[key] = anchorBetas(gp, tA); then?.(); }
+    }).catch((e) => { console.warn("betas unavailable", e); betaCache[key] = {}; });
+    return null;
+  }
   let mcode = hashParam("m", "UST", codes);
   let ccode = hashParam("c", null, FUTURES_BY_MARKET[mcode]) ?? defaultContract(mcode);
   const nodes = {};            // market -> generic curve points {t, base, y, drift, vol}
@@ -67,7 +108,7 @@ function start(contracts, markets) {
   // ---- static layout
   const title = el("div", { class: "page-title" },
     el("h1", {}, "Bond Futures CTD"),
-    el("span", { class: "muted" }, "parametric: CTD regions and fair value from the normal distribution, no simulation"));
+    el("span", { class: "muted" }, "cheapest-to-deliver probabilities, delivery option value and basis payoff at delivery"));
   const marketTabs = el("div");
   const contractTabs = el("div");
   const tiles = el("div", { class: "tiles" });
@@ -78,34 +119,35 @@ function start(contracts, markets) {
   const probs = el("div", { class: "plot", style: { minHeight: "0" } });
   const switchesHost = el("div", { class: "note" });
   const basketHost = el("div");
-  const basketNote = el("p", { class: "note" });
+  const basketNote = el("div");
   const anchorHost = el("div");
   const repoEditorHost = el("div");
   const repoControls = el("div", { class: "row", style: { marginTop: "6px" } });
   const addHost = el("div", { class: "stack", style: { marginTop: "8px" } });
   const basisCtl = el("div", { class: "row", style: { margin: "4px 0 8px" } });
-  const basisLines = el("div", { class: "plot" });
-  const basisLegs = el("div", { class: "plot" });
+  const basisLevel = el("div", { class: "plot" });   // basis P&L vs a parallel move in the generic yield
+  const basisCurve = el("div", { class: "plot" });   // basis P&L vs a steepening of the deliverables' curve
   const basisNote = el("div", { class: "note" });
-  const basisSel = { id: null, side: "long" };   // bond (null = CTD) and side of the basis position
+  const basisSel = { id: null, side: "long", view: "value" };   // bond (null = CTD) and side of the basis position
   const sweepProb = el("div", { class: "plot" });
   const sweepDV01 = el("div", { class: "plot" });
-  const sweepNote = el("p", { class: "note" });
+  const sweepNote = el("div");
+  const repoNotes = el("div");
   // Results first; the input graphs (repo to delivery, generic curve) at the bottom.
   app.append(
     title,
     el("div", { class: "row", style: { marginBottom: "8px" } }, marketTabs, contractTabs),
     tiles,
     el("section", { class: "panel", style: { marginTop: "10px" } },
-      el("h2", {}, "Distribution of the CTD yield at delivery, coloured by CTD"),
+      el("h2", {}, "CTD yield at delivery: distribution by CTD"),
       el("div", { class: "grid cols-2", style: { alignItems: "start" } },
         el("div", {}, payoff, switchesHost),
         el("div", {}, el("h2", {}, "CTD probability"), probs))),
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("h2", {}, "Basis payoff at delivery"), basisCtl,
-      el("div", { class: "grid cols-2" }, basisLines, basisLegs), basisNote),
+      el("div", { class: "grid cols-2" }, basisLevel, basisCurve), basisNote),
     el("section", { class: "panel", style: { marginTop: "10px" } },
-      el("h2", {}, "How the answer changes with today's yield level"),
+      el("h2", {}, "Sensitivity to today's yield level"),
       el("div", { class: "grid cols-2" }, sweepProb, sweepDV01), sweepNote),
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("div", { class: "row", style: { justifyContent: "space-between" } },
@@ -114,14 +156,12 @@ function start(contracts, markets) {
       basketHost, addHost, basketNote, anchorHost),
     el("div", { class: "grid cols-2", style: { marginTop: "10px", alignItems: "start" } },
       el("section", { class: "panel" },
-        el("h2", {}, "Input: CTD repo to delivery, with the boxing option (other deliverables at GC)"),
+        el("h2", {}, "Input: CTD repo to delivery"),
         repoEditorHost, repoControls,
-        el("p", { class: "note" }, "S/N, S/Box and S/Dlv start on the GC repo curve (proxy); drag them or type the CTD's term repo to delivery "
-          + "(special = GC − CTD repo). The boxing premium is the extra forward rate priced between boxing and delivery (red); typing it moves S/Box "
-          + "with S/Dlv held. The CTD is financed at S/Dlv; the Bond Monitor's net basis uses GC.")),
+        repoNotes),
       el("section", { class: "panel" },
         el("div", { class: "row", style: { justifyContent: "space-between" } },
-          el("h2", {}, "Input: generic curve, yield, drift and volatility by point"),
+          el("h2", {}, "Input: generic curve"),
           el("button", { class: "btn", onclick: () => { nodes[mcode] = freshNodes(markets[mcode]); refreshCurve(); } }, "Reset curve")),
         editorHost, nodesHost, spreadsHost)),
     methodNote());
@@ -184,18 +224,25 @@ function start(contracts, markets) {
       const o = inputs[ccode]?.[d.id] ?? {};
       ins[d.id] = { ...o, y: (o.y ?? byId.get(d.id).yield) + shift(yearsBetween(settle, parseDate(d.maturity))) };
     }
+    // Every deliverable moves with the generic yield at the contract's anchor point, by its beta to it.
+    const anchor = { anchorT: anchorT(), betas: betasNow(() => recompute()) ?? {} };
     // The CTD (cheapest at GC repo) is financed at its own term repo to delivery; every other bond at GC.
-    const gc = prepare(contract, market, { inputs: ins });
-    if (!gc.bonds.length) return { inputs: ins };
+    const gc = prepare(contract, market, { inputs: ins, ...anchor });
+    if (!gc.bonds.length) return { inputs: ins, ...anchor };
     const ctdId = gc.bonds[ctdIndex(gc)].id;
-    return { inputs: ins, repoById: { [ctdId]: repoBox().rD }, ctdId };
+    return { inputs: ins, repoById: { [ctdId]: repoBox().rD }, ctdId, ...anchor };
   }
 
   // ---- CTD repo with boxing
-  // Three term rates for the CTD: S/N (O/N for UST), S/Box (to the boxing date, 5 business days before delivery)
-  // and S/Dlv (to delivery). By default they sit on the GC repo curve; each can be dragged, and S/Dlv typed.
+  // Three term rates for the CTD: S/N, S/Box (to the boxing date, 5 business days before delivery) and S/Dlv (to
+  // delivery); O/N, O/Box and O/Dlv for UST, which settles T+1. By default they sit on the GC repo curve; each can be dragged, and S/Dlv typed.
   // The CTD is financed at S/Dlv. The boxing premium is the forward rate between boxing and delivery minus that
   // forward on GC; typing a premium moves S/Box with S/Dlv held.
+  // UST settles T+1, so its repo terms run from today (O/N, O/Box, O/Dlv); euro markets settle T+2 (S/N, S/Box, S/Dlv).
+  function repoLabels() {
+    const p = mcode === "UST" ? "O" : "S";
+    return { sn: `${p}/N`, sbox: `${p}/Box`, sdlv: `${p}/Dlv` };
+  }
   function repoBox() {
     const { market, contract } = current();
     const st = (ctdRepo[ccode] ??= { sn: null, box: null, dlv: null });
@@ -214,7 +261,7 @@ function start(contracts, markets) {
     const fwd = (b, d) => (d * tD - b * tB) / (tD - tB);
     const tN = gc[0].t, rN = st.sn ?? gc[0].rate;
     return { st, box, delivery, tN, rN, tB, tD, rB, rD, rB0, rD0, fwd: fwd(rB, rD), fwd0: fwd(rB0, rD0),
-      premium: (fwd(rB, rD) - fwd(rB0, rD0)) * 100, sn: mcode === "UST" ? "O/N" : "S/N" };
+      premium: (fwd(rB, rD) - fwd(rB0, rD0)) * 100, ...repoLabels() };
   }
   // x in days from settlement (ticks follow the range: delivery is weeks to months away).
   const repoEditor = curveEditor({
@@ -229,15 +276,20 @@ function start(contracts, markets) {
 
   function renderRepoBox(model, ctdName, dragging = false) {
     const b = repoBox();
+    repoNotes.replaceChildren(footnotes(
+      `${b.sn}, ${b.sbox} and ${b.sdlv} start on the GC repo curve (proxy): drag them or type the CTD's term repo to delivery (special = GC − CTD repo).`
+        + (mcode === "UST" ? " Treasuries settle T+1, so the terms run from today (overnight)." : " Euro markets settle T+2, so the terms run from spot."),
+      `Boxing premium: the extra forward rate priced between boxing and delivery (red). Typing it moves ${b.sbox} with ${b.sdlv} held.`,
+      `The CTD is financed at ${b.sdlv}; the other deliverables at GC. The Bond Monitor's net basis uses GC.`));
     const day = (d) => d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
     const days = (t) => t * 365.25;
     repoEditor.update(
-      [{ x: days(b.tN), y: b.rN, label: b.sn }, { x: days(b.tB), y: b.rB, label: "S/Box", anchor: "end" },
-        { x: days(b.tD), y: b.rD, label: "S/Dlv", anchor: "end" }],
+      [{ x: days(b.tN), y: b.rN, label: b.sn }, { x: days(b.tB), y: b.rB, label: b.sbox, anchor: "end" },
+        { x: days(b.tD), y: b.rD, label: b.sdlv, anchor: "end" }],
       [],
       { keepRange: dragging, extra: { lines: [{ x: days(b.tB), label: `Box ${day(b.box)}` }, { x: days(b.tD), label: `Dlv ${day(b.delivery)}` }],
         segments: [{ x0: days(b.tB), x1: days(b.tD), y: b.fwd }] } });
-    const summary = () => [`${ctdName}: ${b.sn} ${b.rN.toFixed(3)}%, S/Box (${day(b.box)}) ${b.rB.toFixed(3)}%, S/Dlv (${day(b.delivery)}) `,
+    const summary = () => [`${ctdName}: ${b.sn} ${b.rN.toFixed(3)}%, ${b.sbox} (${day(b.box)}) ${b.rB.toFixed(3)}%, ${b.sdlv} (${day(b.delivery)}) `,
       el("b", { class: "amber" }, `${b.rD.toFixed(3)}%`), ` (GC ${b.rD0.toFixed(3)}%, special ${fmt.s((b.rD0 - b.rD) * 100, 1)}bp); `
       + `forward boxing → delivery ${b.fwd.toFixed(3)}% vs ${b.fwd0.toFixed(3)}% on GC. Other deliverables: GC ${model.repo.toFixed(3)}%.`];
     if (dragging) {
@@ -313,7 +365,7 @@ function start(contracts, markets) {
       tile("Curve anchor", market.anchor ? `${fmt.s(market.anchor.bondShift(ctd.id, ctd.t) * 100, 1)}bp at the CTD` : "none",
         market.anchor ? `futures + EFP basis VWAP, ${market.anchor.points.length} bonds; closing yields ${market.asOf}` : mcode === "UST" ? "no free CME futures prices: closing yields" : "no EFPs: closing yields"),
       tile("CTD today", ctd.name, `probability ${fmt.pct(res.prob[i0], 0)}`),
-      tile("OA DV01", fmt.n(dv * contract.face / 100, 0), `per contract (${fmt.n(dv, 4)} per 100); CTD β × DV01 / CF ${fmt.n((ctd.beta * ctd.dv01 / ctd.cf) * contract.face / 100, 0)}`),
+      tile("OA DV01", fmt.n(dv * 1000, 2), `per 100,000 notional; CTD β × DV01 / CF ${fmt.n((ctd.beta * ctd.dv01 / ctd.cf) * 1000, 2)}`),
     );
     renderRepoBox(model, model.bonds.find((b) => b.id === opts.ctdId)?.name ?? "CTD", draggingRepo);
     renderPayoff(model, res);
@@ -328,7 +380,7 @@ function start(contracts, markets) {
   const SHIFTS = Array.from({ length: 51 }, (_, i) => -200 + 10 * i);
   function renderSweep(contract, market, opts, cv, model) {
     const grid = sweep(contract, market, opts, cv, SHIFTS);
-    const per = contract.face / 100;
+    const per = 1000;   // DV01 per 100,000 notional (values are per 100 face)
     const ccy = market.currency;
     const active = model.bonds.map((b, i) => i).filter((i) => grid.some((g) => g.prob[i] > 0.01));
     const zero = [{ type: "line", x0: 0, x1: 0, y0: 0, y1: 1, yref: "paper", line: { color: "#5c5c5c", dash: "dot", width: 1 } }];
@@ -351,11 +403,11 @@ function start(contracts, markets) {
       hovertemplate: `${t.name}: ${ccy}%{y:.1f}<extra></extra>` })), {
       hovermode: "x unified", shapes: zero, legend: { y: -0.3 }, margin: { b: 80 },
       xaxis: { title: { text: "Shift in today's generic yield (bp)" } },
-      yaxis: { title: { text: `DV01 per contract (${ccy})` } },
+      yaxis: { title: { text: `DV01 per 100,000 notional (${ccy})` } },
     }, 340);
-    sweepNote.textContent = "Each point re-solves the model with today's yields shifted (every deliverable moves by β × shift), " +
-      "keeping your drift, vol and curve edits. When a CTD switch is likely, the futures DV01 departs from the current CTD's " +
-      "DV01 / CF, so hedge ratios based on the CTD alone over- or under-hedge.";
+    sweepNote.replaceChildren(footnotes(
+      "Each point re-solves the model with today's yields shifted (every deliverable by β × shift), keeping your drift, vol and curve edits.",
+      "When a CTD switch is likely, the futures DV01 departs from the current CTD's DV01 / CF, so a hedge based on the CTD alone over- or under-hedges."));
   }
 
   function tile(k, v, n) {
@@ -368,8 +420,9 @@ function start(contracts, markets) {
   function renderPayoff(model, res) {
     const { bonds } = model;
     const c = ctdIndex(model);
-    const sdBp = res.sd[c] * 100;
-    const xOf = (z) => (res.mu[c] + res.sd[c] * z) * 100;
+    const gen = `generic ${model.anchorT}Y yield`;
+    const sdBp = (res.sdG ?? res.sd[c]) * 100;
+    const xOf = (z) => ((res.muG ?? res.mu[c]) + (res.sdG ?? res.sd[c]) * z) * 100;
     const colourOf = new Map();
     bonds.map((_, i) => i).filter((i) => res.prob[i] >= 0.0005).sort((a, b) => res.prob[b] - res.prob[a])
       .forEach((i, k) => colourOf.set(i, COLORS[k % COLORS.length]));
@@ -390,11 +443,11 @@ function start(contracts, markets) {
         type: "scatter", mode: "lines", x: zs.map(xOf), y: zs.map((z) => phi(z) / sdBp), fill: "tozeroy",
         name: `${bonds[owner].name} ${fmt.pct(res.prob[owner], 1)}`, legendgroup: String(owner), showlegend: first,
         line: { color: colour, width: 1.5 }, fillcolor: hexAlpha(colour, 0.35),
-        hovertemplate: `CTD ${bonds[owner].name}<br>CTD yield %{x:+.0f}bp<extra></extra>`,
+        hovertemplate: `CTD ${bonds[owner].name}<br>${gen} %{x:+.0f}bp<extra></extra>`,
       };
     });
     plot(payoff, traces, {
-      xaxis: { title: { text: `Change in CTD (${bonds[c].name}) yield to delivery, bp` }, zeroline: true },
+      xaxis: { title: { text: `Change in the ${gen} to delivery, bp` }, zeroline: true },
       yaxis: { title: { text: "Probability density (per bp)" }, rangemode: "tozero" },
       shapes: cuts.map((s) => ({ type: "line", x0: xOf(s.z), x1: xOf(s.z), yref: "paper", y0: 0, y1: 1,
         line: { color: "#ffd24d", dash: "dot", width: 1 } })),
@@ -402,10 +455,10 @@ function start(contracts, markets) {
     }, 380);
     const near = res.switches.filter((s) => Math.abs(s.z) <= 3);
     switchesHost.replaceChildren(...near.map((s) => el("div", {},
-      `CTD switches ${bonds[s.from].name} → ${bonds[s.to].name} at ${fmt.s(xOf(s.z), 0)}bp in the CTD yield (z = ${fmt.s(s.z, 2)}, `,
+      `CTD switches ${bonds[s.from].name} → ${bonds[s.to].name} at ${fmt.s(xOf(s.z), 0)}bp in the ${gen} (z = ${fmt.s(s.z, 2)}, `,
       `${fmt.pct(s.z > 0 ? 1 - Phi(s.z) : Phi(s.z), 1)} chance of moving beyond it).`)),
-      near.length ? "" : el("div", {}, "No CTD switch within ±3 standard deviations of the CTD yield at delivery."),
-      el("div", {}, `Mean ${fmt.s(xOf(0), 0)}bp (drift), standard deviation ${sdBp.toFixed(0)}bp to delivery.`));
+      near.length ? "" : el("div", {}, `No CTD switch within ±3 standard deviations of the ${gen} at delivery.`),
+      el("div", {}, `${gen[0].toUpperCase()}${gen.slice(1)}: mean ${fmt.s(xOf(0), 0)}bp (drift), standard deviation ${sdBp.toFixed(0)}bp to delivery; each deliverable moves by its β × that.`));
     const ranked = bonds.map((b, i) => ({ b, i, p: res.prob[i] })).filter((x) => x.p >= 0.0005).sort((a, b) => a.p - b.p);
     plot(probs, [{ type: "bar", orientation: "h", x: ranked.map((r) => 100 * r.p), y: ranked.map((r) => r.b.name),
       marker: { color: ranked.map((r) => colourOf.get(r.i)) }, text: ranked.map((r) => `${(100 * r.p).toFixed(1)}%`), textposition: "outside",
@@ -418,6 +471,8 @@ function start(contracts, markets) {
   //   bond leg     = P_j(T) − forward clean_j                    (carry is in the forward price)
   //   futures leg  = CF_j × (F0 − min_i P_i(T)/CF_i)
   //   net          = CF_j × (P_j/CF_j − min P/CF) − net basis today   (≥ −net basis: a long put on the CTD switch)
+  // Two views: value at delivery = CF_j × (P_j/CF_j − min P/CF), zero while bond j is CTD; P&L to delivery = that
+  // value − today's net basis, i.e. with the coupon income and the repo cost of holding the bond to delivery.
   // On the model's z line, so the x axis and the colours match the distribution chart above.
   function renderBasis(model, res, fut, mkt, unit, ccy, contract) {
     const { bonds } = model;
@@ -432,42 +487,59 @@ function start(contracts, markets) {
     const env = (z) => Math.min(...bonds.map((_, i) => res.ratio(i, z)));
     const envs = zs.map(env);
     const nb = (i) => bonds[i].fwdClean - fut * bonds[i].cf;                 // net basis today, price per 100
-    const net = (i, k) => sgn * (bonds[i].cf * (res.ratio(i, zs[k]) - envs[k]) - nb(i));
+    const pnlView = basisSel.view === "pnl";
+    const start = (i) => (pnlView ? nb(i) : 0);   // P&L: less today's net basis (carry and repo in); value: nothing
+    const net = (i, k) => sgn * (bonds[i].cf * (res.ratio(i, zs[k]) - envs[k]) - start(i));
     const m = unit.mult;
     // Bonds with a realistic chance of being delivered, plus the chosen one.
     const shown = bonds.map((_, i) => i).filter((i) => i === j || res.prob[i] >= 0.005 || i === c);
-    const sdBp = res.sd[c] * 100;
-    const density = { type: "scatter", mode: "lines", name: "Density", x: xs, y: zs.map((z) => phi(z) / sdBp), yaxis: "y2", fill: "tozeroy",
-      line: { color: "rgba(140,140,140,0.5)", width: 1 }, fillcolor: "rgba(140,140,140,0.12)", hoverinfo: "skip", showlegend: false };
+    // P&L at delivery for given yield moves of each deliverable (bp, on top of the expected path), on the model's
+    // pricing: res.ratio(i, z) moves bond i's forward yield by sd_i × z, so a move of x bp is z = x / 100 / sd_i.
+    const zFor = (i, bp) => (res.sd[i] > 0 ? bp / 100 / res.sd[i] : 0);
+    const pnlAt = (moves) => {
+      const r = bonds.map((_, i) => res.ratio(i, zFor(i, moves[i])));
+      const e = Math.min(...r);
+      return { ctd: r.indexOf(e), at: (i) => sgn * (bonds[i].cf * (r[i] - e) - start(i)) * m };
+    };
     const zero = [{ type: "line", x0: 0, x1: 1, xref: "paper", y0: 0, y1: 0, line: { color: "#5c5c5c", width: 1 } }];
-    const cuts = res.switches.filter((s) => Math.abs(s.z) < Z).map((s) => ({ type: "line", x0: xOf(s.z), x1: xOf(s.z), yref: "paper", y0: 0, y1: 1,
-      line: { color: "#ffd24d", dash: "dot", width: 1 } }));
-    const xaxis = { title: { text: `Change in CTD (${bonds[c].name}) yield to delivery, bp` } };
-    const y2 = { overlaying: "y", side: "right", showgrid: false, showticklabels: false, rangemode: "tozero", range: [0, (phi(0) / sdBp) * 3] };
     const colourFor = (i, k) => colours.get(bonds[i].id) ?? COLORS[(k + 4) % COLORS.length];
-    plot(basisLines, [density, ...shown.map((i, k) => ({
-      type: "scatter", mode: "lines", name: `${bonds[i].name}`, x: xs, y: zs.map((_, q) => net(i, q) * m),
-      line: { color: colourFor(i, k), width: i === j ? 3 : 1.5, dash: i === j ? "solid" : "dot" },
-      hovertemplate: `${bonds[i].name}: %{y:.1f}${unit.label}<extra></extra>`,
-    }))], {
-      hovermode: "x unified", shapes: [...zero, ...cuts], legend: { y: -0.3 }, margin: { b: 90 }, xaxis,
-      yaxis: { title: { text: `${sgn > 0 ? "Long" : "Short"} basis P&L (${unit.label} per 100)` } }, yaxis2: y2,
-    }, 380);
+    const yTitle = pnlView ? `${sgn > 0 ? "Long" : "Short"} basis P&L to delivery, incl. carry and repo (${unit.label} per 100)`
+      : `${sgn > 0 ? "Long" : "Short"} basis value at delivery (${unit.label} per 100)`;
+    // Lines for every shown bond over a grid of moves, with dotted lines where the CTD switches.
+    const draw = (node, grid, movesOf, xTitle, extra = []) => {
+      const pts = grid.map((x) => pnlAt(movesOf(x)));
+      const cuts = [];
+      for (let k = 1; k < grid.length; k++) if (pts[k].ctd !== pts[k - 1].ctd) {
+        const x = (grid[k] + grid[k - 1]) / 2;
+        cuts.push({ type: "line", x0: x, x1: x, yref: "paper", y0: 0, y1: 1, line: { color: "#ffd24d", dash: "dot", width: 1 } });
+      }
+      plot(node, [...extra, ...shown.map((i, k) => ({
+        type: "scatter", mode: "lines", name: bonds[i].name, x: grid, y: pts.map((p) => p.at(i)),
+        line: { color: colourFor(i, k), width: i === j ? 3 : 1.5, dash: i === j ? "solid" : "dot" },
+        hovertemplate: `${bonds[i].name}: %{y:.1f}${unit.label}<extra></extra>`,
+      }))], {
+        hovermode: "x unified", shapes: [...zero, ...cuts], legend: { y: -0.3 }, margin: { b: 90 },
+        xaxis: { title: { text: xTitle } }, yaxis: { title: { text: yTitle } },
+        yaxis2: { overlaying: "y", side: "right", showgrid: false, showticklabels: false, rangemode: "tozero" },
+      }, 400);
+    };
+    // 1) Generic yield: every deliverable moves by β × the shift; grey = the model's distribution of that shift.
+    const sdG = (res.sdG ?? (bonds[c].beta ? res.sd[c] / bonds[c].beta : res.sd[c])) * 100;         // bp
+    const gridL = Array.from({ length: 141 }, (_, k) => -3.5 * sdG + (7 * sdG * k) / 140);
+    draw(basisLevel, gridL, (x) => bonds.map((bd) => bd.beta * x), `Move in the generic ${model.anchorT}Y yield to delivery (from its drift path), bp`,
+      [{ type: "scatter", mode: "lines", name: "Density", x: gridL, y: gridL.map((x) => phi(x / sdG) / sdG), yaxis: "y2", fill: "tozeroy",
+        line: { color: "rgba(140,140,140,0.5)", width: 1 }, fillcolor: "rgba(140,140,140,0.12)", hoverinfo: "skip", showlegend: false }]);
+    // 2) Curve: a steepening pivoting on the CTD; x = change in the yield spread between the shortest and the
+    // longest deliverable (bond i moves x × (t_i − t_CTD) / (t_max − t_min)), the level at its expected path.
+    const ts = bonds.map((bd) => bd.t), span = Math.max(...ts) - Math.min(...ts) || 1;
+    const gridC = Array.from({ length: 121 }, (_, k) => -60 + k);
+    draw(basisCurve, gridC, (x) => bonds.map((bd) => (x * (bd.t - bonds[c].t)) / span),
+      `Steepening of the deliverables' curve (longest − shortest), bp; pivot ${bonds[c].name}`);
     const b = bonds[j];
-    const legBond = zs.map((z) => sgn * (b.cf * res.ratio(j, z) - b.fwdClean) * m);
-    const legFut = zs.map((z, k) => sgn * b.cf * (fut - envs[k]) * m);
     const legNet = zs.map((_, k) => net(j, k) * m);
-    plot(basisLegs, [density,
-      { name: `Bond (${sgn > 0 ? "long" : "short"} ${b.name}, carry included)`, y: legBond, color: "#5fa8ff", w: 1.5 },
-      { name: `Futures (${sgn > 0 ? "short" : "long"} CF ${b.cf.toFixed(4)})`, y: legFut, color: "#ff5c5c", w: 1.5 },
-      { name: "Net basis position", y: legNet, color: "#ff9e1b", w: 3 },
-    ].map((t) => (t.type ? t : { type: "scatter", mode: "lines", name: t.name, x: xs, y: t.y, line: { color: t.color, width: t.w },
-      hovertemplate: `${t.name.split(" (")[0]}: %{y:.1f}${unit.label}<extra></extra>` })), {
-      hovermode: "x unified", shapes: [...zero, ...cuts], legend: { y: -0.3 }, margin: { b: 90 }, xaxis,
-      yaxis: { title: { text: `P&L to delivery (${unit.label} per 100)` } }, yaxis2: y2,
-    }, 380);
     // Expected P&L = CF × (F0 − fair futures), since E[min P/CF] is the fair price.
-    const exp = sgn * (b.cf * (fut - res.fair)) * m;
+    // Expected P&L = CF × (futures − fair futures); expected value at delivery = that + net basis = fair net basis.
+    const exp = sgn * (b.cf * (fut - res.fair) + (pnlView ? 0 : nb(j))) * m;
     const lo = Math.min(...legNet), hi = Math.max(...legNet);
     const per10 = (x) => `${x < 0 ? "−" : "+"}${ccy}${fmt.int(Math.abs((x / m) * 1e5))}`;                    // per 10mm nominal: price per 100 × 1e5
     const futLots = Math.round((1e7 * b.cf) / contract.face);
@@ -477,17 +549,27 @@ function start(contracts, markets) {
         bonds.map((x, i) => el("option", { value: x.id, selected: i === j }, `${i === c ? "◆ " : ""}${x.name} · CTD ${fmt.pct(res.prob[i], 0)}`))),
       el("span", { class: "amber" }, "Position"),
       segmented([{ code: "long", label: "Long basis (buy bond, sell futures)" }, { code: "short", label: "Short basis (sell bond, buy futures)" }],
-        basisSel.side, (v) => { basisSel.side = v; recompute(); }));
+        basisSel.side, (v) => { basisSel.side = v; recompute(); }),
+      el("span", { class: "amber" }, "Show"),
+      segmented([{ code: "value", label: "Value at delivery" }, { code: "pnl", label: "P&L incl. carry & repo" }], basisSel.view, (v) => { basisSel.view = v; recompute(); }));
     basisNote.replaceChildren(
       el("div", {}, `${b.name}: net basis today ${fmt.n(nb(j) * m, 1)}${unit.label} (gross ${fmt.n((b.clean - fut * b.cf) * m, 1)} − carry ${fmt.n(b.carry * m, 1)}) at futures ${priceText(mcode, fut)}${mkt ? " (market)" : " (model fair)"}. `
-        + `Expected P&L to delivery ${fmt.s(exp, 1)}${unit.label}; range over ±3.5 sd ${fmt.s(lo, 1)} to ${fmt.s(hi, 1)}${unit.label}. `
+        + `Expected ${pnlView ? "P&L to delivery, incl. carry and repo," : "value at delivery"} ${fmt.s(exp, 1)}${unit.label}; range over ±3.5 sd ${fmt.s(lo, 1)} to ${fmt.s(hi, 1)}${unit.label}. `
         + `Per ${ccy}10mm of bond (${fmt.int(futLots)} contracts): expected ${per10(exp)}, worst ${per10(lo)}.`),
       el("div", {}, sgn > 0
-        ? "Long basis = long the delivery option: the most it loses is today's net basis, if the bond is still CTD at delivery; it gains when yields move far enough for another bond to become cheapest. "
+        ? `Long basis = long the delivery option: the most it loses is today's net basis, if the bond is still CTD at delivery; it gains when yields move far enough for another bond to become cheapest. `
           + "For a bond other than the CTD the floor is its delivery basis, which is above zero unless it becomes CTD."
-        : "Short basis = short the delivery option: it earns the net basis if the bond is CTD at delivery and loses when the CTD switches away from it."),
-      el("div", {}, "Left: net P&L for each likely deliverable (chosen bond solid). Right: the chosen bond's two legs. Futures hedge = CF per 100 of bond, held to delivery (no re-hedging, "
-        + "so the legs show the duration mismatch once the CTD switches). Grey: distribution of the CTD yield; yellow lines: CTD switch points. Drift, vol, repo and curve edits apply."));
+        : `Short basis = short the delivery option: it earns the net basis if the bond is CTD at delivery and loses when the CTD switches away from it.`),
+      footnotes(
+        "Net P&L to delivery of each likely deliverable's basis position (the chosen bond solid), per 100 nominal of bond.",
+        `Carry = coupon income − repo cost; for ${b.name}: ${fmt.n((b.carry + b.repoCost) * m, 1)} − ${fmt.n(b.repoCost * m, 1)} = ${fmt.n(b.carry * m, 1)}${unit.label} to delivery `
+          + `(repo ${b.repo.toFixed(3)}%).`,
+        "Value at delivery: CF × (P/CF − lowest P/CF), the basis then; zero while the bond is CTD, positive once another bond is cheapest.",
+        "P&L incl. carry & repo: value at delivery − today's net basis. The bond earns its coupon and is financed at its repo until delivery (net basis = gross basis − carry).",
+        "Futures hedge = CF per 100 of bond, held to delivery with no re-hedging.",
+        "Left: P&L against a parallel move in the generic yield (each deliverable by β × the move); grey = its distribution to delivery. "
+          + "Right: against a steepening pivoting on the CTD, with the level at its expected path.",
+        "Yellow lines: CTD switch points. Drift, vol, repo and curve edits apply. Expected P&L and range above use the model's distribution of the CTD yield."));
   }
 
   const basketTable = dataTable([
@@ -500,7 +582,7 @@ function start(contracts, markets) {
       title: "Closing yield before the futures anchor" },
     { key: "y", label: "Yield", unit: "%", title: "Anchored to the futures and EFP basis; edit to override",
       edit: { get: (r) => r.y.toFixed(4), set: (r, v) => setInput(r.id, { y: clampYield(v, r.y) - r.shift }), changed: (r) => inputs[ccode]?.[r.id]?.y != null } },
-    { key: "beta", label: "Beta", edit: { get: (r) => r.beta.toFixed(2), set: (r, v) => setInput(r.id, { beta: +v }), changed: (r) => inputs[ccode]?.[r.id]?.beta != null } },
+    { key: "beta", label: "β to generic", edit: { get: (r) => r.beta.toFixed(2), set: (r, v) => setInput(r.id, { beta: +v }), changed: (r) => inputs[ccode]?.[r.id]?.beta != null } },
     { key: "cf", label: "CF", edit: { get: (r) => r.cf.toFixed(4), set: (r, v) => setInput(r.id, { cf: +v }), changed: (r) => inputs[ccode]?.[r.id]?.cf != null } },
     { key: "fy", label: "Fwd yield", unit: "%", fmt: (r) => r.fwdYield.toFixed(3), value: (r) => r.fwdYield },
     { key: "ratio", label: "P/CF at delivery", edit: { get: (r) => r.ratio0.toFixed(4), set: (r, v) => {
@@ -508,16 +590,18 @@ function start(contracts, markets) {
       setInput(r.id, { y: y - r.shift });
     } } },
     { key: "efp", label: "EFP basis VWAP", get unit() { return basisUnit(mcode).label; }, fmt: (r) => (r.efp == null ? "–" : fmt.n(r.efp, 1)), value: (r) => r.efp,
-      title: "Daily VWAP gross basis of the bond's EFP trades (EURX page), the anchor" },
+      title: "Daily VWAP gross basis of the bond's EFP trades (EURX page), the anchor", hide: () => mcode === "UST" },
     { key: "gross", label: "Gross basis", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.gross, 1), value: (r) => r.gross },
     { key: "repo", label: "Repo", unit: "%", fmt: (r) => r.repo.toFixed(3), value: (r) => r.repo, cls: (r) => (r.repo < last.model.repo - 1e-6 ? "amber" : ""),
       title: "Term repo to delivery: the CTD's own rate (set above), GC for the others" },
+    { key: "irr", label: "IRR", unit: "%", fmt: (r) => (r.irr == null ? "–" : r.irr.toFixed(3)), value: (r) => r.irr, cls: (r) => (r.irrMax ? "pos" : ""),
+      title: "Implied repo rate: the return from buying the bond today and delivering it into the futures (act/360); the highest is the cheapest to deliver" },
     { key: "carry", label: "Carry", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.carryT, 1), value: (r) => r.carryT },
     { key: "nbm", label: "Net basis", get unit() { return basisUnit(mcode).label; }, fmt: (r) => (r.nbMkt == null ? "–" : fmt.n(r.nbMkt, 1)), value: (r) => r.nbMkt,
       title: "Gross basis − carry: the output" },
     { key: "nbf", label: "Net basis fair", get unit() { return basisUnit(mcode).label; }, fmt: (r) => fmt.n(r.nbFair, 1), value: (r) => r.nbFair },
     { key: "p", label: "CTD prob", unit: "%", fmt: (r) => fmt.n(100 * r.prob, 1), value: (r) => r.prob, cls: (r) => (r.prob > 0.5 ? "pos" : "") },
-    { key: "dv01", label: "DV01", unit: "/100", fmt: (r) => r.dv01.toFixed(4), value: (r) => r.dv01 },
+    { key: "dv01", label: "DV01", unit: "/100k", title: "Price change for 1bp per 100,000 notional", fmt: (r) => (r.dv01 * 1000).toFixed(2), value: (r) => r.dv01 },
   ], { sortKey: "name", rowClass: (r) => (r.isCtd ? "hl" : null) });
   basketTable.node.classList.remove("tall");
   basketHost.append(basketTable.node);
@@ -531,19 +615,37 @@ function start(contracts, markets) {
     const close = new Map(market.bonds.map((b) => [b.id, b.closeYield ?? b.yield]));
     const contract = contracts[ccode];
     const efpDate = market.anchor?.dates[contract.product];
+    // Implied repo rate: buy the bond today (dirty), deliver it at futures × CF + accrued, coupons in between
+    // reinvested at the same rate; money-market act/360.
+    const D = (model.delivery - model.settle) / 864e5;
+    const irrOf = (b) => {
+      if (D <= 0) return null;
+      const mat = parseDate(b.maturity);
+      const dirty0 = b.clean + pricer(b.coupon, mat, model.settle, market.freq).accrued;
+      const cpn = b.coupon / market.freq;
+      const pays = couponsBetween(mat, model.settle, model.delivery, market.freq);
+      const inflow = fut * b.cf + pricer(b.coupon, mat, model.delivery, market.freq).accrued + cpn * pays.length;
+      const denom = dirty0 * D / 360 - pays.reduce((a, d) => a + cpn * ((model.delivery - d) / 864e5) / 360, 0);
+      return ((inflow - dirty0) / denom) * 100;
+    };
+    const irrs = model.bonds.map(irrOf);
+    const irrBest = Math.max(...irrs.filter((x) => x != null));
     basketTable.update(model.bonds.map((b, i) => ({
-      ...b, isCtd: i === c, prob: res.prob[i], shift: shift(b.t), added: extra.has(b.id), closeYield: close.get(b.id),
+      ...b, isCtd: i === c, irr: irrs[i], irrMax: irrs[i] === irrBest, prob: res.prob[i], shift: shift(b.t), added: extra.has(b.id), closeYield: close.get(b.id),
       efp: efpDate && contract.basis?.[b.id]?.[efpDate] ? contract.basis[b.id][efpDate].c * unit.mult / 100 : null,
       gross: (b.clean - fut * b.cf) * unit.mult, carryT: b.carry * unit.mult,
       nbFair: res.nbFair[i] * unit.mult, nbMkt: mkt ? (b.fwdClean - mkt.price * b.cf) * unit.mult : null,
     })));
-    basketNote.textContent = (market.anchor
-      ? `Yields anchored to the futures: bonds with EFP trades on ${efpDate} take the yield of futures VWAP × CF + their EFP gross basis VWAP, `
-        + `so their gross basis is the EURX VWAP; other bonds move with the shift interpolated across contracts (closing yields of ${market.asOf} in Close yield). `
-      : `Yields as of ${market.asOf} (end-of-day prices). `) +
-      `Gross basis = clean price − futures × CF using ${mkt ? "the market" : "the model's fair"} futures price; carry = clean − forward clean ` +
-      `price at delivery (the CTD at its own repo, set above; the others at GC ${model.repo.toFixed(3)}%); net basis = gross − carry, the output. Fair net basis uses the fair futures price. ` +
-      `◆ = CTD at forward prices. Edited inputs are highlighted; P/CF edits solve for the yield.`;
+    basketNote.replaceChildren(footnotes(
+      market.anchor
+        ? `Yields anchored to the futures: bonds with EFP trades on ${efpDate} take the yield of futures VWAP × CF + their EFP gross basis VWAP `
+          + `(so their gross basis is the EURX VWAP); the others move with the shift interpolated across contracts. Close yield: closing yields of ${market.asOf}.`
+        : `Yields as of ${market.asOf} (end-of-day prices).`,
+      `Gross basis = clean price − futures × CF, at ${mkt ? "the market" : "the model's fair"} futures price. Fair net basis uses the fair futures price.`,
+      `Carry = clean − forward clean price at delivery: the CTD at its own repo (set below), the others at GC ${model.repo.toFixed(3)}%. Net basis = gross − carry.`,
+      `IRR (implied repo rate): buy the bond today, deliver it at futures × CF + accrued (futures ${mkt ? "market" : "model fair"} price), coupons in between reinvested; act/360. `
+        + "The highest IRR (green) is the cheapest to deliver; compare it with the bond's repo.",
+      "◆ = CTD at forward prices. Edited inputs are highlighted; P/CF edits solve for the yield."));
     renderAnchor(market, unit);
   }
 
@@ -561,8 +663,9 @@ function start(contracts, markets) {
           el("td", {}, p.futures.toFixed(3)), el("td", {}, p.cf.toFixed(6)), el("td", {}, fmt.n(p.basis * unit.mult / 100, 1)),
           el("td", {}, fmt.int(p.lots)), el("td", {}, p.implied.toFixed(4)), el("td", {}, p.close.toFixed(4)),
           el("td", { class: signClass(p.shift * 100, 0.5) }, fmt.s(p.shift * 100, 1))))))),
-      el("p", { class: "note" }, "Implied yield: the yield at the market's settlement of clean price = futures VWAP × CF + EFP gross basis VWAP. "
-        + `Interpolation points (lot-weighted per contract): ${a.perContract.map((p) => `${p.contract} ${p.t.toFixed(1)}y ${fmt.s(p.shift * 100, 1)}bp`).join(", ")}; flat beyond.`)));
+      footnotes(
+        "Implied yield: the yield, at the market's settlement, of clean price = futures VWAP × CF + EFP gross basis VWAP.",
+        `Interpolation points (lot-weighted per contract): ${a.perContract.map((p) => `${p.contract} ${p.t.toFixed(1)}y ${fmt.s(p.shift * 100, 1)}bp`).join(", ")}; flat beyond.`)));
   }
 
   // ---- adding bonds to the basket
@@ -678,7 +781,8 @@ function clampYield(v, current) {
 function methodNote() {
   return el("details", { class: "method panel" }, el("summary", {}, "Method and data"),
     el("ul", { class: "small" },
-      el("li", {}, "Each deliverable's yield at delivery is its forward yield + drift × T + beta × vol × √T × z, with one standard normal z for all bonds (a single-factor, parallel-plus-beta curve model). Drift and vol are read off the generic curve points at the bond's maturity."),
+      el("li", {}, "One factor: the generic yield at the contract's anchor point (fitted curve: TU, DU, BTS 2Y; FV, OE 5Y; TY, UXY, RX, OAT, IK 10Y; US, WN, UB 30Y). Its move to delivery is drift × T + vol × √T × z, with z standard normal; drift and vol are read off the generic curve at that point. "
+        + "Each deliverable's yield at delivery = its forward yield + β × the generic move, β being the bond's beta to the generic yield."),
       el("li", {}, "The futures delivers the lowest price / conversion factor. The points on the z line where the cheapest bond changes are solved exactly, so CTD probabilities are differences of normal CDFs; the fair futures price is the expected lower envelope (Simpson's rule over ±5 standard deviations). Nothing is simulated."),
       el("li", {}, "Bonds can be added to the basket, from the market or by hand (e.g. a new issue). Their conversion factor is computed with the CME formula (UST) or as Eurex does (price per 1 nominal at the 6% notional coupon, 4% for the Buxl, on the delivery date) unless typed in. Check eligibility against the exchange's rules."),
       el("li", {}, "Moving a curve point shifts today's yields of the deliverables by the interpolated change at their maturity; the forward yields then follow from repo. Drift is your expected yield change per year to delivery; vol is the normal (bp) volatility per year, defaulting to the realised 3-month volatility of that curve point."),
@@ -687,5 +791,5 @@ function methodNote() {
         + "Those bonds take the implied yield; other bonds and the generic curve points move by the lot-weighted shift of each contract, interpolated by maturity and flat beyond. "
         + "Gross basis is then the EURX VWAP for traded bonds, and net basis = gross basis − carry is the output. The Bond Monitor uses the same net basis."),
       el("li", {}, "Basis payoff: P&L to delivery of long bond (financed at its repo) and short CF futures per 100 nominal, at today's market futures price (model fair price when there is none). At delivery the futures equals the lowest P/CF, so the position is worth CF × (P/CF − min P/CF) and costs today's net basis. Expected P&L = CF × (futures − fair futures), so a futures trading rich to fair makes the long basis cheap."),
-      el("li", {}, "Beta: regression of each bond's daily yield change on the fitted curve's change at its maturity over 3 months (clipped to 0.5–1.5).")));
+      el("li", {}, "β to generic: regression of each bond's daily yield change on the generic (fitted-curve) yield's change at the anchor point over the last 3 months, clipped to 0.3–2; editable per bond.")));
 }
