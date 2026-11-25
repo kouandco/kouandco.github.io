@@ -75,6 +75,19 @@ export function forwardPrice(bond, spotClean, settle, fwd, repo) {
 
 export function nsEval(fit, t) {
   const b = fit.beta;
+  if (fit.spread) {   // an issue type's curve: the market curve + its sector spread (bp, piecewise linear, flat beyond the ends)
+    const { t: ks, s } = fit.spread;
+    const x = Math.min(Math.max(t, ks[0]), ks[ks.length - 1]);
+    let j = 0;
+    while (j < ks.length - 2 && x > ks[j + 1]) j++;
+    const w = ks[j + 1] > ks[j] ? (x - ks[j]) / (ks[j + 1] - ks[j]) : 0;
+    return nsEval({ ...fit, spread: null }, t) + ((1 - w) * s[j] + w * s[j + 1]) / 100;
+  }
+  if (fit.kind === "sv") {   // Svensson
+    const x1 = Math.max(t, 1e-6) / fit.tau[0], x2 = Math.max(t, 1e-6) / fit.tau[1];
+    const f1 = (1 - Math.exp(-x1)) / x1, f2 = (1 - Math.exp(-x2)) / x2;
+    return b[0] + b[1] * f1 + b[2] * (f1 - Math.exp(-x1)) + b[3] * (f2 - Math.exp(-x2));
+  }
   if (fit.kind === "ns") {
     const x = Math.max(t, 1e-6) / fit.tau;
     const f1 = (1 - Math.exp(-x)) / x;

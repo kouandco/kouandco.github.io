@@ -19,7 +19,7 @@ try {
 
 function start(contracts, auctions, markets) {
   const codes = MARKETS.map((m) => m.code);
-  let mcode = hashParam("m", "DE", codes);
+  let mcode = hashParam("m", "UST", codes);
   // market -> {GC repo pillars, haircut, overrides: id -> {gc, special}, table filters, carry / roll chart mode}
   const state = {};
   const stateFor = (m) => (state[m] ??= {
@@ -303,7 +303,9 @@ function start(contracts, auctions, markets) {
       const fit = market.groups[g];
       if (fit) {
         const xs = Array.from({ length: 80 }, (_, i) => Math.max(fit.tmin, 0.1) + ((fit.tmax - Math.max(fit.tmin, 0.1)) * i) / 79);
-        traces.push({ type: "scatter", mode: "lines", name: `${g} curve`, x: xs, y: xs.map((x) => nsEval(fit.fit, x)), line: { color, width: 1.5 }, hoverinfo: "skip", showlegend: false });
+        // Only where the type has bonds: across a gap (no bond of the type within 1.5 years) the curve is interpolation.
+        const near = (x) => rs.some((r) => Math.abs(r.t - x) <= 1.5);
+        traces.push({ type: "scatter", mode: "lines", name: `${g} curve`, x: xs, y: xs.map((x) => (near(x) ? nsEval(fit.fit, x) : null)), line: { color, width: 1.5 }, hoverinfo: "skip", showlegend: false });
       }
     });
     traces.push({ type: "scatter", mode: "markers+text", name: "Futures CTD", x: legs.map((l) => l.t), y: legs.map((l) => l.row.yield),
@@ -347,7 +349,12 @@ function methodNote() {
       el("li", {}, "Universe: nominal fixed-coupon government bonds (no inflation-linked, floating, strips or retail issues); bills excluded. UST: TreasuryDirect end-of-day prices; Bunds: Bundesbank; OATs and BTPs: Borsa Italiana closing prices. Lines more than 40bp off the fitted curve or not quoted in the past week are left out."),
       el("li", {}, "Realised 3m vol: standard deviation of daily yield changes over the last 63 trading days, annualised (× √252), in bp. Daily changes beyond 4 robust standard deviations are clipped so a stale or off-market close does not dominate an illiquid line."),
       el("li", {}, "Carry 3m, in bp of the bond's yield: (yield − repo) × dirty price × 0.25 / DV01. Held at an unchanged yield the bond earns its yield on the dirty price (coupon plus pull to par) and pays repo on the same amount; dividing by DV01 expresses that as the rise in yield that would cancel it, so it adds directly to roll down. Repo = GC + special premium; GC is the 3-month point of the repo curve, a proxy built from SOFR and Treasury bills (US) or €STR and the ECB AAA government curve (euro), editable."),
-      el("li", {}, "Roll 3m: a Nelson-Siegel curve is fitted separately to each issue type (e.g. 2y, 5y, 10y, 30y Treasuries; Schatz, Bobl, Bund, green Bunds; BTP; OAT). Assuming that curve is unchanged in 3 months, roll = curve(T) − curve(T − 0.25), in bp; positive means the yield falls."),
+      el("li", {}, "Fitted curve: a Svensson curve (Nelson-Siegel with a second hump; both decays chosen by grid search) through all of the market's bonds. "
+        + "Bonds far off it for structural reasons (old high-coupon lines, rich off-the-runs) are left out of that fit by a robust rule but still shown. "
+        + "Each issue type (2y, 5y, 10y, 30y Treasuries; Schatz, Bobl, Bund, green Bunds; BTP; OAT) gets its own curve: the market curve plus the type's "
+        + "gap to it, a smooth function of maturity, so e.g. old 30-year bonds in the 10-15 year area form their own rich sector. "
+        + "A type's curve is drawn only where it has bonds."),
+      el("li", {}, "Roll 3m: assuming the issue type's curve is unchanged in 3 months, roll = curve(T) − curve(T − 0.25), in bp; positive means the yield falls."),
       el("li", {}, "Hedge: UST, Bund and BTP use a fly hedge across the two futures whose CTDs bracket the bond's maturity, split linearly by maturity; bonds beyond the shortest or longest CTD, and the CTDs themselves, use the nearest contract alone. OATs use the OAT future alone. Weights are shares of the bond's DV01."),
       el("li", {}, "Hedged carry and roll = bond − Σ weight × CTD (bp, so DV01-neutral). Hedge net basis = Σ weight × (bond DV01 / CTD DV01) × CTD net basis, in cents per 100 nominal of the bond: a short futures position pays away the net basis (the value of the delivery option) as delivery approaches. The front contract may deliver before the 3-month horizon."),
       el("li", {}, "Return on book = [(hedged carry + roll) × DV01 − hedge net basis] / dirty price. Return on capital = return on book / haircut. Both over 3 months, not annualised."),

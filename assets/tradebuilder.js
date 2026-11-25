@@ -110,7 +110,7 @@ export function buildTrade(U, spec) {
 
 // The builder panel. onCreate({legs, weights, name}) is called with the built trade.
 export function tradeBuilder(U, { onCreate, onCancel, createLabel = "Add" }) {
-  const spec = { type: "basis2", market: "DE", side: 1, size: 10, sizeMode: "notional" };
+  const spec = { type: "basis2", market: "UST", side: 1, size: 10, sizeMode: "notional" };
   const box = el("div", { class: "panel", style: { margin: "8px 0", borderColor: "#5c4a14" } });
   const resetMain = () => {
     const T = TRADE_TYPES.find((x) => x.code === spec.type);

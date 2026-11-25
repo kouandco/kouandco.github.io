@@ -47,11 +47,11 @@ function defaultBond(market, target = 10, needAsw = false) {
   return [...U.bonds.values()].filter((b) => b.market === market && (!needAsw || b.asw != null))
     .sort((a, b) => Math.abs(a.t - target) - Math.abs(b.t - target))[0]?.id;
 }
-function defaultLeg(type = "bond", market = "DE") {
+function defaultLeg(type = "bond", market = "UST") {
   const repo = repoAt(U.markets[market].repo.points, 30 / 365);
   if (type === "bond" || type === "asw") return { type, market, id: defaultBond(market, 10, type === "asw"), side: 1, qtyMode: "notional", qty: 10e6, repo: +repo.toFixed(3), haircut: 2, repoSpread: 0 };
   if (type === "fut") { const code = Object.keys(U.futs).find((k) => U.futs[k].market === market) ?? Object.keys(U.futs)[0]; return { type, id: code, side: 1, qtyMode: "notional", qty: 100 }; }
-  return { type, id: "EUR €STR", tenor: 10, fixed: null, side: 1, qtyMode: "dv01", qty: 10000 };
+  return { type, id: "USD SOFR", tenor: 10, fixed: null, side: 1, qtyMode: "dv01", qty: 10000 };
 }
 function newTrade(n) {
   const start = iso(addDays(new Date(), -60));
@@ -164,7 +164,7 @@ function renderLegs(t) {
           : select(leg, "tenor", IRS_TENORS.map((y) => ({ v: y, label: `${y}Y` })), { numeric: true }));
     };
     const typeSel = select(leg, "type", TYPES.map((x) => ({ v: x.code, label: x.label })), {
-      onchange: () => { t.legs[i] = defaultLeg(leg.type, leg.market ?? "DE"); },
+      onchange: () => { t.legs[i] = defaultLeg(leg.type, leg.market ?? "UST"); },
     });
     const marketSel = leg.type === "bond" || leg.type === "asw"
       ? select(leg, "market", MARKETS.map((m) => ({ v: m.code, label: m.label })), { onchange: () => { leg.id = defaultBond(leg.market, 10, leg.type === "asw"); leg.repo = +repoAt(U.markets[leg.market].repo.points, 30 / 365).toFixed(3); } })
@@ -195,7 +195,7 @@ function renderLegs(t) {
         "Price / level", "Maturity", "DV01", "Size", "Leg DV01 today", ""].map((h, i) => el("th", { class: i < 6 ? "l" : "" }, h)))),
       el("tbody", {}, rows))),
     el("div", { class: "row", style: { marginTop: "6px" } },
-      n < MAX_LEGS ? el("button", { class: "btn", onclick: () => { t.legs.push(defaultLeg(t.legs[0]?.type === "irs" ? "irs" : "bond", t.legs[0]?.market ?? "DE")); t.weights = defaultWeights(t.legs.length); renderAll(); } }, "+ Add leg") : null,
+      n < MAX_LEGS ? el("button", { class: "btn", onclick: () => { t.legs.push(defaultLeg(t.legs[0]?.type === "irs" ? "irs" : "bond", t.legs[0]?.market ?? "UST")); t.weights = defaultWeights(t.legs.length); renderAll(); } }, "+ Add leg") : null,
       el("span", { class: "muted small" }, "Prices, DV01 and size are today's (DV01 sizing re-solved at the start date in the backtest). Leg DV01: gain for a 1bp fall in rates.")));
 }
 

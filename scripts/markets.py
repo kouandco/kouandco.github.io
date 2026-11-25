@@ -19,6 +19,7 @@ import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from functools import cache
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -26,7 +27,7 @@ import requests
 from pandas.tseries.holiday import USFederalHolidayCalendar
 
 import curves
-from common import (DATA, UA, accrued, add_business_days, curve_eval, dv01, frac_name, get, isin_from_cusip, ns_fit,
+from common import (DATA, UA, accrued, add_business_days, curve_eval, curve_fit, dv01, sector_spread, frac_name, get, isin_from_cusip,
                     pricer, session, write_json, years, yield_from_price)
 
 WINDOW = 63           # trading days in the realised-vol window (3 months)
@@ -66,14 +67,19 @@ def fedinvest(day):
 
 
 def treasury_terms():
-    """Original term in years (2, 3, 5, 7, 10, 20, 30) by CUSIP, from auction records."""
+    """Original term in years (2, 3, 5, 7, 10, 20, 30) by CUSIP, from auction records. Some lines were first
+    auctioned with an odd term (e.g. "29-Year 9-Month", "30-Year 3-Month", "20-Year 1-Month", "5-Year 2-Month"):
+    each takes the nearest standard term."""
+    standard = (2, 3, 5, 7, 10, 20, 30)
     terms = {}
-    for kind, names in (("Note", ["2-Year", "3-Year", "5-Year", "7-Year", "10-Year"]), ("Bond", ["20-Year", "30-Year"])):
-        for term in names:
-            url = ("https://www.treasurydirect.gov/TA_WS/securities/search?format=json"
-                   f"&type={kind}&securityTerm={term}&startDate=1985-01-01&endDate={date.today()}")
-            for r in get(url, timeout=120).json():
-                terms.setdefault(r["cusip"], int(r["originalSecurityTerm"].split("-")[0]))
+    for kind in ("Note", "Bond"):
+        url = ("https://www.treasurydirect.gov/TA_WS/securities/search?format=json"
+               f"&type={kind}&startDate=1985-01-01&endDate={date.today()}")
+        for r in get(url, timeout=120).json():
+            m = re.match(r"(\d+)-Year(?: (\d+)-Month)?", r.get("originalSecurityTerm") or "")
+            if m:
+                years = int(m[1]) + int(m[2] or 0) / 12
+                terms.setdefault(r["cusip"], min(standard, key=lambda t: abs(t - years)))
     return terms
 
 
@@ -214,7 +220,8 @@ def parse_coupon(desc, coupon_col, freq):
 
 def borsa_history(isin):
     """Daily closing prices. Bars are [time, open, open, high, low, close, volume]; today's bar is still
-    forming during the session, so it is left out."""
+    forming during the session, so it is kept only after the close (MOT continuous trading ends at 17:30
+    Milan; prices are delayed 15 minutes, so from 18:00)."""
     body = {"request": {"SampleTime": "1d", "TimeFrame": "2y", "RequestedDataSetType": "ohlc", "ChartPriceType": "price",
                         "Key": f"{isin}.MOT", "OffSetTime": 0, "FromDate": None, "ToDate": None, "UseDelay": True,
                         "KeyType": "Topic", "KeyType2": "Topic", "Language": "en-US"}}
@@ -222,7 +229,9 @@ def borsa_history(isin):
                      json=body, headers={"Referer": "https://www.borsaitaliana.it/"}, timeout=60)
     r.raise_for_status()
     bars = ((datetime.fromtimestamp(p[0] / 1000, tz=timezone.utc).date(), p[5]) for p in r.json().get("d", []))
-    return {d: px for d, px in bars if px and d < date.today()}
+    rome = datetime.now(ZoneInfo("Europe/Rome"))
+    last = rome.date() if rome.hour >= 18 else rome.date() - timedelta(days=1)
+    return {d: px for d, px in bars if px and d <= last}
 
 
 def borsa_market(path, prefix, keep, prefix_name, freq):
@@ -304,10 +313,12 @@ def analyse(code, bonds, yields):
     bonds["t"] = [years(settle, m) for m in bonds.maturity]
     bonds = bonds[bonds.t > 0.1]
 
-    # Drop bad prints: more than 40bp from a curve fitted to all bonds.
-    fit_all = ns_fit(bonds.t, bonds["yield"])
+    # Drop bad prints: more than 40bp from a curve fitted to all bonds. The curve itself is fitted to the bonds
+    # that remain after its robust trim (see common.curve_fit); trimmed bonds stay on the page, off the curve.
+    fit_all, _ = curve_fit(bonds.t, bonds["yield"])
     bonds = bonds[(bonds["yield"] - curve_eval(fit_all, bonds.t)).abs() < 0.4]
-    fit_all = ns_fit(bonds.t, bonds["yield"])
+    fit_all, in_fit = curve_fit(bonds.t, bonds["yield"])
+    taus = tuple(fit_all["tau"]) if fit_all["kind"] == "sv" else None
 
     # Daily all-bond curve fits over the window: realised vols of generic points and bond betas.
     window = yields[bonds.id].iloc[-(WINDOW + 1):]
@@ -315,7 +326,7 @@ def analyse(code, bonds, yields):
     fits = []
     for _, row in window.iterrows():
         ok = row.notna().values & (t > 0.25)
-        fits.append(ns_fit(t[ok], row.values[ok]) if ok.sum() >= 8 else None)
+        fits.append(curve_fit(t[ok], row.values[ok], taus)[0] if ok.sum() >= 8 else None)   # today's decays: consistent day to day
     valid = [i for i, f in enumerate(fits) if f]
     curve_at = np.array([curve_eval(fits[i], t) for i in valid])            # dates x bonds
     nodes_hist = np.array([curve_eval(fits[i], cfg["nodes"]) for i in valid])
@@ -333,10 +344,15 @@ def analyse(code, bonds, yields):
             betas.append(1.0)
     node_vol = np.std(np.diff(nodes_hist, axis=0), axis=0, ddof=1) * np.sqrt(252) * 100
 
+    # Issue-type curves: the all-bond curve plus the type's own gap to it, a smooth function of maturity (see
+    # common.sector_spread), so e.g. old 30-year bonds get their own rich sector in the 10-15 year area. A
+    # separate curve fit per type is unstable: most types span a narrow range of maturities.
     groups = {}
+    resid = (bonds["yield"] - curve_eval(fit_all, bonds.t)) * 100
     for g, sub in bonds.groupby("group"):
-        if len(sub) >= 5:
-            groups[g] = {"fit": ns_fit(sub.t, sub["yield"]), "tmin": float(sub.t.min()), "tmax": float(sub.t.max()), "n": len(sub)}
+        if len(sub) >= 3:
+            groups[g] = {"fit": {**fit_all, "spread": sector_spread(sub.t, resid[sub.index])},
+                         "tmin": float(sub.t.min()), "tmax": float(sub.t.max()), "n": len(sub)}
 
     out_bonds = []
     for (_, b), vol, beta in zip(bonds.iterrows(), vols, betas):
@@ -419,9 +435,10 @@ def add_asw(code, data, curve_set):
 FIT_TENORS = [2, 5, 10, 30]
 
 
-def fit_history(bonds, yields):
-    """The all-bond Nelson-Siegel curve at 2, 5, 10 and 30 years for every day of the history, fitted as
-    in analyse(): maturities from that day, bad prints (> 40bp off a first fit) dropped, at least 8 bonds."""
+def fit_history(bonds, yields, taus=None):
+    """The all-bond Svensson curve at 2, 5, 10 and 30 years for every day of the history, fitted as in
+    analyse(): maturities from that day, bad prints (> 40bp off a first fit) dropped, at least 8 bonds. The decays
+    are held at today's (`taus`), so the generic points move with the bonds, not with a re-chosen curve shape."""
     maturity = dict(zip(bonds.id, bonds.maturity))
     ids = [i for i in yields.columns if i in maturity]
     mats = np.array([pd.Timestamp(maturity[i]).value for i in ids], dtype=float)
@@ -432,10 +449,10 @@ def fit_history(bonds, yields):
         ok = ~np.isnan(y) & (t > 0.25)
         nodes = [None] * len(FIT_TENORS)
         if ok.sum() >= 8:
-            fit = ns_fit(t[ok], y[ok])
+            fit, _ = curve_fit(t[ok], y[ok], taus)
             keep = ok & (np.abs(y - curve_eval(fit, t)) < 0.4)
             if keep.sum() >= 8:
-                nodes = [round(float(v), 4) for v in curve_eval(ns_fit(t[keep], y[keep]), FIT_TENORS)]
+                nodes = [round(float(v), 4) for v in curve_eval(curve_fit(t[keep], y[keep], taus)[0], FIT_TENORS)]
         for k, v in zip(FIT_TENORS, nodes):
             out[k].append(v)
     return out
@@ -457,7 +474,7 @@ def write_gp(code, data, yields, bonds):
     all_days = yields.dropna(how="all").sort_index()
     write_json(DATA / "gp" / f"{code}.json", {
         "fitDates": [str(d.date()) for d in all_days.index],
-        "fit": {str(k): v for k, v in fit_history(bonds, all_days).items()},
+        "fit": {str(k): v for k, v in fit_history(bonds, all_days, tuple(data["curve"]["tau"]) if data["curve"]["kind"] == "sv" else None).items()},
         "market": code, "freq": data["freq"], "settleDays": MARKETS[code]["settle"],
         "dates": [str(d.date()) for d in y.index],
         "bonds": [{"id": b["id"], "name": b["name"], "group": b["group"], "coupon": b["coupon"], "maturity": b["maturity"]}

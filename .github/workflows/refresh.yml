@@ -1,12 +1,18 @@
 name: Refresh data
 
-# Every weekday at 10:00 London time. GitHub cron runs in UTC, so it fires at 09:00 and
-# 10:00 UTC (10:00 London in summer and winter respectively) plus an 11:00 UTC backup in case
-# a run is delayed or a source fails; the first step skips runs before 10:00 London or after
-# every step has already succeeded that day.
+# Three refreshes every weekday, London time:
+#   10:00  morning: DTCC's file of the previous day (complete after midnight New York), overnight fixings
+#          (€STR, SONIA, SOFR / EFFR), and a retry of anything the evening runs missed
+#   19:00  evening: European closes (Borsa Italiana OATs and BTPs, Bundesbank Bunds), Eurex trade files
+#   23:30  night: US closes (TreasuryDirect FedInvest, Treasury par curve) and the Eurex Clearing curves
+# GitHub cron runs in UTC, so each slot has a cron for summer (UTC+1) and winter (UTC) plus backups in
+# case a run is delayed or a source fails. The first step works out the slot from the London time and
+# skips the run if the slot already succeeded in full today (data/meta.json "slots").
 on:
   schedule:
-    - cron: "0 9,10,11 * * 1-5"
+    - cron: "0 9,10,11 * * 1-5"     # morning: 10:00 London, backups
+    - cron: "0 18,19,20 * * 1-5"    # evening: 19:00 London, backups
+    - cron: "30 22,23 * * 1-5"      # night: 23:30 London (summer 22:30 UTC, winter 23:30 UTC), backup
   workflow_dispatch:
 
 permissions:
@@ -23,18 +29,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check London time
+      - name: Pick the refresh slot
         id: gate
+        env:
+          MANUAL: ${{ github.event_name == 'workflow_dispatch' }}
         run: |
-          hour=$(TZ=Europe/London date +%H)
-          today=$(TZ=Europe/London date +%Y-%m-%d)
-          # Only "done" once every step succeeded today, so the backup run retries failed sources.
-          done=$(python3 -c "import json;m=json.load(open('data/meta.json'));print(m.get('refreshed','')[:10] if all(s['ok'] for s in m['steps'].values()) else '')" 2>/dev/null || true)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || { [ "$hour" -ge 10 ] && [ "$done" != "$today" ]; }; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Skipping: London hour $hour, last refresh $done"
-          fi
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json, os, sys
+          from datetime import datetime, timedelta
+          from zoneinfo import ZoneInfo
+          now = datetime.now(ZoneInfo("Europe/London"))
+          h = now.hour
+          day = (now - timedelta(days=1) if h < 2 else now).date()   # a late night run belongs to the evening before
+          slot = "morning" if 10 <= h < 15 else "evening" if 19 <= h < 23 else "night" if h >= 23 or h < 2 else None
+          try:
+              done = json.load(open("data/meta.json")).get("slots", {}).get(slot)
+          except Exception:
+              done = None
+          manual = os.environ["MANUAL"] == "true"
+          run = manual or (slot is not None and done != str(day))
+          print(f"London {now:%H:%M}, slot {slot}, last full success {done}: {'run' if run else 'skip'}", file=sys.stderr)
+          print(f"run={'true' if run else 'false'}")
+          print(f"slot={slot or 'manual'}")
+          print(f"day={day}")
+          EOF
 
       - uses: actions/setup-python@v5
         if: steps.gate.outputs.run == 'true'
@@ -45,6 +63,9 @@ jobs:
 
       - name: Refresh
         if: steps.gate.outputs.run == 'true'
+        env:
+          REFRESH_SLOT: ${{ steps.gate.outputs.slot }}
+          REFRESH_DAY: ${{ steps.gate.outputs.day }}
         run: |
           pip install -r scripts/requirements.txt
           python scripts/refresh.py
@@ -55,5 +76,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data
-          git diff --cached --quiet || git commit -m "Refresh data $(TZ=Europe/London date +'%Y-%m-%d %H:%M')"
+          git diff --cached --quiet || git commit -m "Refresh data $(TZ=Europe/London date +'%Y-%m-%d %H:%M') (${{ steps.gate.outputs.slot }})"
           git push

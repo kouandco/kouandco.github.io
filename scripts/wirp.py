@@ -172,6 +172,62 @@ def fed_decisions(rates, since):
     return out
 
 
+SEP_PAGE = "https://www.federalreserve.gov/monetarypolicy/fomcprojtabl{ymd}.htm"
+
+
+def parse_dots(page):
+    """Figure 2 of an SEP page: participants per federal funds rate level (midpoint of the target range), for each
+    year-end and the longer run. Returns (column labels, {label: [[rate, count], ...]})."""
+    start = page.find("Figure 2.")
+    table = page[start:page.find("</table>", start)]
+    rows = [re.findall(r"<t[hd][^>]*>(.*?)</t[hd]>", r, re.S) for r in re.findall(r"<tr[^>]*>(.*?)</tr>", table, re.S)]
+    clean = lambda c: re.sub(r"<[^>]+>|&nbsp;|\*", "", c).strip()
+    rows = [[clean(c) for c in r] for r in rows if r]
+    labels = rows[0][1:]
+    dots = {lab: [] for lab in labels}
+    for r in rows[1:]:
+        try:
+            rate = float(r[0])
+        except ValueError:
+            continue
+        for lab, c in zip(labels, r[1:]):
+            if c.isdigit() and int(c):
+                dots[lab].append([rate, int(c)])
+    return labels, dots
+
+
+def dot_stats(levels):
+    """Median (the Fed's: middle participant, or the mean of the middle two), range and count of one column."""
+    xs = sorted(r for r, n in levels for _ in range(n))
+    if not xs:
+        return None
+    k = len(xs)
+    med = xs[k // 2] if k % 2 else (xs[k // 2 - 1] + xs[k // 2]) / 2
+    return {"median": round(med, 4), "low": xs[0], "high": xs[-1], "n": k}
+
+
+def fed_dots():
+    """Dot plots of every Summary of Economic Projections linked from the FOMC calendar page. Past SEPs never
+    change, so each is fetched once and kept in data/history/fed_dots.json."""
+    path = DATA / "history" / "fed_dots.json"
+    cache = json.loads(path.read_text()) if path.exists() else {}
+    for ymd in sorted(set(re.findall(r"fomcprojtabl(\d{8})\.htm", get(FOMC).text))):
+        d = str(datetime.strptime(ymd, "%Y%m%d").date())
+        if d in cache:
+            continue
+        r = session.get(SEP_PAGE.format(ymd=ymd), timeout=60)
+        if r.status_code != 200 or "Figure 2." not in r.text:
+            continue
+        labels, dots = parse_dots(r.text)
+        if not any(dots.values()):
+            continue
+        cache[d] = {"date": d, "link": SEP_PAGE.format(ymd=ymd), "years": labels, "dots": dots,
+                    "stats": {lab: dot_stats(v) for lab, v in dots.items()}}
+        time.sleep(0.3)
+    write_json(path, dict(sorted(cache.items())))
+    return [cache[k] for k in sorted(cache)]
+
+
 def ecb_decisions(rates, since):
     out, seen = [], set()
     for year in range(since.year, date.today().year + 1):
@@ -284,6 +340,13 @@ def build():
         past = sorted(decisions[code](history, since), key=lambda x: x["date"], reverse=True)
         out[code] = {"name": name, "curve": curve_id, "basis": basis, "calendar": calendar, **rates[code],
                      "priced": base, "meetings": meetings, "forwards": forwards(curve, basis), "decisions": past}
+        if code == "Fed":
+            try:
+                out[code]["dots"] = fed_dots()
+            except Exception as e:   # the dot plots are extra: keep the archive if the Fed site fails
+                path = DATA / "history" / "fed_dots.json"
+                print(f"Fed dot plots: {type(e).__name__}: {e}; keeping the archive")
+                out[code]["dots"] = list(json.loads(path.read_text()).values()) if path.exists() else []
         nxt = meetings[0]
         print(f"{code}: {rates[code]['policyLabel']}; next {nxt['date']} {nxt['change']:+.1f}bp; "
               f"{meetings[min(7, len(meetings) - 1)]['date']} cumulative {meetings[min(7, len(meetings) - 1)]['cumulative']:+.1f}bp")
@@ -296,7 +359,6 @@ def build():
                         for code, b in out.items() for m in b["meetings"]])
     hist = pd.concat([hist[hist.date != as_of], new]).sort_values(["date", "bank", "meeting"])
     hist.to_csv(path_csv, index=False)
-    wide = hist.assign(implied=hist.implied.astype(float)).pivot_table(index="date", columns=["bank", "meeting"], values="implied")
 
     # Constant-horizon pricing, comparable from one day to the next as meetings pass.
     gen_path = DATA / "history" / "wirp_generic.csv"
@@ -313,6 +375,12 @@ def build():
     gen.index.name = "date"
     gen.to_csv(gen_path, float_format="%.4f")
 
+    write_gp_history(hist, gen)
+
+
+def write_gp_history(hist, gen):
+    """data/gp/wirp.json from the long meeting history and the constant-horizon table."""
+    wide = hist.assign(implied=hist.implied.astype(float)).pivot_table(index="date", columns=["bank", "meeting"], values="implied")
     dates = sorted(set(wide.index) | set(gen.index.astype(str)))
     series = {k: [None if pd.isna(v) else float(v) for v in gen[k].reindex(dates)] for k in gen.columns}
     series.update({f"{b}|{m}": [None if pd.isna(v) else float(v) for v in wide[(b, m)].reindex(dates)] for b, m in wide.columns})

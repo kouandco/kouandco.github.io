@@ -42,7 +42,7 @@ function start(contracts, markets) {
   const futLabel = (k) => `${k} ${contracts[k].expiry} · CTD ${futs[k].ctd.name}`;
 
   const state = {
-    market: hashParam("m", "DE", codes),
+    market: hashParam("m", "UST", codes),
     bond: hashParam("b", null),
     notional: 10_000_000,
     side: 1,

@@ -11,14 +11,29 @@ const app = $("#app");
 //   X|contract|expiry|isin gross basis           I|contract|expiry|leg       invoice spread
 //   W|bank|meeting        implied policy rate (or a constant-horizon pricing series, e.g. W|Fed|Next meeting move bp)
 //   C|market|tenor        fitted curve           P|name                      policy rate or overnight fixing
+//   SS|name               USD swap spread (DTCC SOFR − Treasury par) D|name           DTCC daily VWAP swap rate
+//   T|KIND|name           DTCC trade series: CURVE / FLY / SPREAD (bp), INV (invoice swap rate, %)
+//   COT|name              CFTC net position (contracts) or open interest of a Treasury futures contract
 //   =expression|name      formula over basket letters
 const MEASURES = { y: { label: "Yield", unit: "%" }, p: { label: "Price", unit: "pts" }, a: { label: "ASW", unit: "bp" } };
 const KINDS = [
   { code: "bond", label: "Bond" }, { code: "generic", label: "Generic" }, { code: "fitted", label: "Fitted curve" },
-  { code: "swap", label: "Swap" }, { code: "fut", label: "Futures" }, { code: "basis", label: "Basis" },
-  { code: "inv", label: "Invoice spread" }, { code: "policy", label: "Policy rate" }, { code: "wirp", label: "WIRP" },
+  { code: "swap", label: "Swap" }, { code: "spread", label: "Swap spread" }, { code: "dtcc", label: "DTCC" }, { code: "fut", label: "Futures" }, { code: "basis", label: "Basis" },
+  { code: "inv", label: "Invoice spread" }, { code: "policy", label: "Policy rate" }, { code: "cftc", label: "CFTC" }, { code: "wirp", label: "WIRP" },
   { code: "formula", label: "Formula" },
 ];
+// DTCC trade series (data/gp/dtcc_trades.json), by prefix.
+const TRADE_SERIES = {
+  CURVE: { label: "curve (DTCC)", unit: "bp" }, FLY: { label: "fly (DTCC)", unit: "bp" },
+  SPREAD: { label: "traded swap spread (DTCC)", unit: "bp" }, INV: { label: "invoice swap rate (DTCC)", unit: "%" },
+  INVSPREAD: { label: "invoice spread (DTCC, reported)", unit: "bp" },
+};
+// Sources offered under a kind: [code, label].
+const SOURCES = {
+  spread: [["traded", "DTCC traded swap spreads"], ["derived", "SOFR swaps − Treasury par (15:30 NY)"]],
+  inv: [["dtcc", "DTCC invoice swaps"], ["eurex", "Eurex EFS invoice spreads"]],
+  dtcc: [["outright", "Outright swap rates"], ["curve", "Curves"], ["fly", "Flies"]],
+};
 const RANGES = [{ code: "1M", label: "1M", days: 31 }, { code: "3M", label: "3M", days: 92 }, { code: "6M", label: "6M", days: 183 },
   { code: "1Y", label: "1Y", days: 366 }, { code: "All", label: "All", days: Infinity }];
 const VIEWS = [{ code: "level", label: "Level" }, { code: "rebased", label: "Change since start" }, { code: "diff", label: "Daily change" }];
@@ -71,6 +86,10 @@ async function resolve(key) {
   if (kind === "P") return fromTable(store.policy, p[0], p[0], "%");
   if (kind === "W" && !/^\d{4}-/.test(p[1])) return fromTable(store.wirp, `${p[0]}|${p[1]}`, `${p[0]} ${p[1].replace(/ (bp|%)$/, "")}`, p[1].endsWith("%") ? "%" : "bp");
   if (kind === "S") return fromTable(store.swaps, p[0], `${p[0]} swap`, "%");
+  if (kind === "SS") return fromTable(store.spreads, p[0], p[0], "bp");
+  if (kind === "D") return fromTable(store.dtcc, p[0], `${p[0]} DTCC VWAP`, "%");
+  if (kind === "COT") return fromTable(store.cftc, p[0], `${p[0]} (CFTC)`, "contracts");
+  if (kind === "T") return fromTable(store.dtccTrades, `${p[0]}|${p[1]}`, `${p[1]} ${TRADE_SERIES[p[0]].label}`, TRADE_SERIES[p[0]].unit);
   if (kind === "F") return fromTable(store.eurex, `FUT|${p[0]}|${p[1]}`, `${p[0]} ${p[1]} futures`, "pts");
   if (kind === "X") return fromTable(store.eurex, `BASIS|${p.join("|")}`, `${p[0]} ${p[1]} basis ${basketBondName(p[0], p[2])}`, "c");
   if (kind === "I") return fromTable(store.eurex, `INV|${p.join("|")}`, `${p[0]} ${p[1]} invoice spread${p[2] === "all" ? "" : ` (${p[2]})`}`, "bp");
@@ -130,11 +149,11 @@ async function start() {
     range: RANGES.some((r) => r.code === params.get("r")) ? params.get("r") : "All",
     view: VIEWS.some((v) => v.code === params.get("v")) ? params.get("v") : "level",
     scatterMode: params.get("sm") === "level" ? "level" : "diff",
-    x: params.get("x"), y: params.get("y"), window: 20,
+    x: params.get("x"), y: params.get("y"), window: 20, source: {},
     basket: [],   // {letter, key, label, unit, points, right}
   };
   // Basket in the URL as letter~key pairs, so formulas keep pointing at the same letters.
-  const saved = (params.get("s") ?? "A~G|DE|10|y,B~G|FR|10|y,C~=(B-A)*100|OAT − Bund 10Y bp").split(",").filter(Boolean);
+  const saved = (params.get("s") ?? "A~G|UST|2|y,B~G|UST|10|y,C~=(B-A)*100|UST 2s10s bp").split(",").filter(Boolean);
   for (const item of saved) {
     const [letter, key] = item.includes("~") ? item.split("~") : [null, item];
     await addSeries(key, false, letter).catch((e) => console.warn(key, e));
@@ -199,6 +218,9 @@ async function start() {
   }
 
   // ---- picker
+  // The source chosen under a kind (Swap spread, Invoice spread, DTCC).
+  function source() { return state.source[state.kind] ?? SOURCES[state.kind]?.[0][0]; }
+
   function renderPicker() {
     const msg = el("span", { class: "small" });
     const add = (key) => addSeries(key).then(() => { msg.className = "small up"; msg.textContent = "Added"; })
@@ -207,7 +229,7 @@ async function start() {
       const s = el("select", {}, opts.map(([v, t]) => el("option", { value: v, selected: v === value || null }, t)));
       return s;
     };
-    const marketSel = select(MARKETS.map((m) => [m.code, m.label]), "DE");
+    const marketSel = select(MARKETS.map((m) => [m.code, m.label]), "UST");
     const measureSel = (withPrice = true) => select(Object.entries(MEASURES).filter(([k]) => withPrice || k !== "p").map(([k, m]) => [k, m.label]), "y");
     let controls;
     if (state.kind === "bond") {
@@ -227,12 +249,29 @@ async function start() {
     } else if (state.kind === "fitted") {
       const tenorSel = select([2, 5, 10, 30].map((t) => [t, `${t}Y`]), 10);
       controls = [marketSel, tenorSel, el("button", { class: "btn", onclick: () => add(`C|${marketSel.value}|${tenorSel.value}`) }, "Add")];
+    } else if (state.kind === "cftc") {
+      const s = select(Object.keys(store.cftc.series).map((k) => [k, k]), "TY Leveraged funds net");
+      controls = [s, el("button", { class: "btn", onclick: () => add(`COT|${s.value}`) }, "Add")];
     } else if (state.kind === "policy") {
       const s = select(Object.keys(store.policy.series).map((k) => [k, k]));
       controls = [s, el("button", { class: "btn", onclick: () => add(`P|${s.value}`) }, "Add")];
     } else if (state.kind === "swap") {
-      const s = select(Object.keys(store.swaps.series).map((k) => [k, k]), "EUR 6M 10Y");
+      const s = select(Object.keys(store.swaps.series).map((k) => [k, k]), "USD SOFR 10Y");
       controls = [s, el("button", { class: "btn", onclick: () => add(`S|${s.value}`) }, "Add")];
+    } else if (state.kind === "spread" || state.kind === "dtcc" || (state.kind === "inv" && source() === "dtcc")) {
+      // Lists from one source: [key to add, label]; DTCC trade series by prefix.
+      const trade = (prefix) => Object.keys(store.dtccTrades.series).filter((k) => k.startsWith(`${prefix}|`)).map((k) => [`T|${k}`, k.slice(prefix.length + 1)]);
+      const lists = {
+        "spread/traded": [trade("SPREAD"), "T|SPREAD|USD SOFR 10Y on-the-run"],
+        "spread/derived": [Object.keys(store.spreads.series).map((k) => [`SS|${k}`, k]), "SS|USD swap spread 10Y"],
+        "inv/dtcc": [[...trade("INVSPREAD").map(([k, l]) => [k, `${l} · invoice spread (bp)`]), ...trade("INV").map(([k, l]) => [k, `${l} · swap rate (%)`])], null],
+        "dtcc/outright": [Object.keys(store.dtcc.series).map((k) => [`D|${k}`, k.replace(" @NY", " (14:30–16:30 New York)")]), "D|USD SOFR 10Y"],
+        "dtcc/curve": [trade("CURVE"), "T|CURVE|USD SOFR 2s10s"],
+        "dtcc/fly": [trade("FLY"), "T|FLY|USD SOFR 2s5s10s"],
+      };
+      const [opts, preferred] = lists[`${state.kind}/${source()}`];
+      const s = select(opts, preferred);
+      controls = [s, el("button", { class: "btn", onclick: () => add(s.value) }, "Add")];
     } else if (state.kind === "fut") {
       const s = select(Object.keys(store.eurex.series).filter((k) => k.startsWith("FUT|")).map((k) => [k.slice(4), k.slice(4).replace("|", " ")]));
       controls = [s, el("button", { class: "btn", onclick: () => add(`F|${s.value}`) }, "Add")];
@@ -267,16 +306,31 @@ async function start() {
       bond: "Any bond in the four markets. Price is clean, from the closing yield. ASW history starts on the day it was first archived.",
       generic: "The bond that is the benchmark today, with its own history (a roll to a new benchmark is not spliced in).",
       swap: "Par swap rates from Eurex Clearing curves, archived daily from the day they were added.",
+      spread: source() === "traded"
+        ? "Traded swap spreads: the package spread of swap spread trades reported to DTCC (swap vs bond), bp, notional-weighted each day. USD: \"on-the-run\" = swaps maturing with the Treasury on the run that day "
+          + "(the series rolls to each new issue), or another Treasury matched on maturity. EUR / GBP: by key tenor or matched bond."
+        : "USD swap spread = SOFR swap rate − Treasury par yield (Treasury's daily par curve, about 15:30 New York), bp. SOFR: spot-starting SOFR swaps reported to DTCC and traded 14:30–16:30 New York, matched in time to the Treasury curve.",
+      dtcc: {
+        outright: "Daily notional-weighted average fixed rate of spot-starting swaps of exactly that tenor reported to DTCC (off-market prints dropped), from November 2024. @NY: USD SOFR swaps traded 14:30–16:30 New York only.",
+        curve: "Curve packages reported to DTCC (two legs, same second and venue), spot, key-rate tenors: long − short leg in bp, DV01-weighted each day. The side (steepener or flattener) is not published.",
+        fly: "Fly packages reported to DTCC (three legs), spot, key-rate tenors: 2 × belly − wings in bp, DV01-weighted each day.",
+      }[source()],
       fut: "Daily VWAP of the futures leg of Eurex EFP and EFS trades.",
       basis: "Gross basis = cash − futures × CF in cents, daily VWAP of EFP trades.",
-      inv: "Invoice spread = swap rate − futures-implied yield of the matched deliverable, bp, daily VWAP of EFS trades. Lower / upper: the two clusters most likely €STR and 6M Euribor swaps.",
-      fitted: "Nelson-Siegel curve fitted to all of the market's nominal bonds each day (bad prints over 40bp dropped). Bonds that have since matured are not in the OAT and BTP fits.",
+      inv: source() === "dtcc"
+        ? "Invoice swaps reported to DTCC (forward swaps from a futures delivery date to a deliverable's maturity), by contract, notional-weighted each day: "
+          + "the invoice spread reported with about one trade in ten (bp, signs and scales checked against swap rate − bond yield), and the swap rate of every trade (%)."
+        : "Invoice spread = swap rate − futures-implied yield of the matched deliverable, bp, daily VWAP of Eurex EFS trades. Lower / upper: the two clusters most likely €STR and 6M Euribor swaps.",
+      fitted: "Svensson curve fitted to all of the market's nominal bonds each day (bad prints over 40bp dropped, structural outliers trimmed). Bonds that have since matured are not in the OAT and BTP fits.",
       policy: "Policy rates and overnight fixings over two years: NY Fed, ECB Data Portal, Bank of England database.",
       wirp: "Pricing from the WIRP page, archived daily: the move priced at the next meeting, the cumulative move and implied rate 6M and 1Y ahead, or one meeting's implied rate.",
+      cftc: "CFTC Commitments of Traders (Traders in Financial Futures, futures only), weekly since 2006: net long − short of each trader group in Treasury futures, in contracts; see CFTC for DV01 and 10Y equivalents.",
       formula: "Combine series by letter: (B-A)*100 for a spread in bp, (2*B-A-C)*100 for a fly. Dates where every series has a value.",
     }[state.kind];
     picker.replaceChildren(el("h2", {}, "Add a series"),
       segmented(KINDS, state.kind, (k) => { state.kind = k; renderPicker(); }),
+      SOURCES[state.kind] ? el("div", { class: "row", style: { marginTop: "6px" } }, el("span", { class: "amber" }, "Source"),
+        segmented(SOURCES[state.kind].map(([code, label]) => ({ code, label })), source(), (v) => { state.source[state.kind] = v; renderPicker(); })) : null,
       el("div", { class: "row", style: { margin: "10px 0 4px" } }, ...controls, msg),
       el("p", { class: "note" }, hint));
   }
@@ -482,8 +536,10 @@ function methodNote() {
       + "converted to yields at the market's settlement convention. Up to two years are kept; Bund history starts in July 2026, UST history is backfilled a month per daily run."),
     el("li", {}, "ASW: par-par asset swap spread vs SOFR (UST) or 6M Euribor with €STR discounting (euro area), from Eurex Clearing's daily curves; archived from November 2026."),
     el("li", {}, "Swap rates: spot-starting par rates from the same curves (fixed annual; EUR 6M floating semi-annual)."),
-    el("li", {}, "Fitted curves: the Nelson-Siegel curve through all of a market's nominal bonds, refitted for every day of the yield history. "
-      + "It sits above the on-the-run benchmarks where older, cheaper issues dominate (UST 10Y by about 15bp)."),
+    el("li", {}, "USD swap spread: SOFR swap rate − US Treasury daily par yield (about 15:30 New York) at the same tenor, SOFR from DTCC-reported swaps traded 14:30–16:30 New York. "
+      + "DTCC swap rates: daily VWAP of spot-starting trades reported to the DTCC repository, from October 2026 (see DTCC)."),
+    el("li", {}, "Fitted curves: the Svensson curve through all of a market's nominal bonds (decays held at today's), refitted for every day of the yield history. "
+      + "It sits above on-the-run benchmarks that trade rich (UST 10Y by about 8bp); 2Y, 5Y and 30Y are within 1-2bp."),
     el("li", {}, "Policy rates and fixings: NY Fed (target range, EFFR), ECB Data Portal (deposit facility rate, €STR), Bank of England database (Bank Rate, SONIA), two years."),
     el("li", {}, "WIRP pricing is archived from November 2026: the Eurex Clearing file holds only the latest curves, so earlier dates cannot be rebuilt."),
     el("li", {}, "Futures, gross basis and invoice spreads: daily volume-weighted averages of Eurex EFP and EFS trades (the trade archive starts in October 2026). "
@@ -497,7 +553,12 @@ try {
     loadJSON("data/gp/eurex.json"), loadJSON("data/gp/swaps.json"), loadJSON("data/gp/wirp.json"), loadJSON("data/futures.json"),
     ...MARKETS.map((m) => loadJSON(`data/markets/${m.code}.json`))]);
   MARKETS.forEach((m, i) => { store.markets[m.code] = mk[i]; });
-  store.policy = await loadJSON("data/gp/policy.json").catch(() => ({ dates: [], series: {} }));
+  const empty = () => ({ dates: [], series: {} });
+  store.policy = await loadJSON("data/gp/policy.json").catch(empty);
+  store.spreads = await loadJSON("data/gp/spreads.json").catch(empty);
+  store.dtcc = await loadJSON("data/gp/dtcc.json").catch(empty);
+  store.dtccTrades = await loadJSON("data/gp/dtcc_trades.json").catch(empty);
+  store.cftc = await loadJSON("data/gp/cftc.json").catch(empty);
   Object.assign(store, { eurex, swaps, wirp, futures: futures.contracts });
   await start();
 } catch (err) {

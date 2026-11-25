@@ -35,7 +35,7 @@ export function riskFrame(code) {
     const keep = ["Swap curves", "FX rates"];
     const failed = Object.entries(meta.steps).filter(([n, s]) => keep.includes(n) && !s.ok);
     status.replaceChildren(
-      el("span", {}, `Data refreshed ${meta.refreshed} (weekdays at 10:00 London)`),
+      el("span", {}, `Data refreshed ${meta.refreshed} (weekdays at 10:00, 19:00 and 23:30 London)`),
       el("span", {}, "Curves: Eurex Clearing settlement · FX: ECB reference rates"),
       ...failed.map(([name, s]) => el("span", { class: "bad", title: s.error }, `${name}: refresh failed, showing data from ${s.lastGood ?? "earlier"}`)));
   }).catch(() => status.replaceChildren("Data status unavailable"));

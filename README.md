@@ -1,7 +1,8 @@
 # kouandco.github.io
 
 Rates tools served at [seankou.com](https://seankou.com) by GitHub Pages: plain HTML and JavaScript
-pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 London time.
+pages reading JSON files that a GitHub Action refreshes every weekday at 10:00, 19:00 and 23:30 London time: European closes in the
+evening, US closes at night, and DTCC and overnight fixings the next morning (`.github/workflows/refresh.yml`).
 
 | Page | What it shows |
 |------|---------------|
@@ -9,6 +10,8 @@ pages reading JSON files that a GitHub Action refreshes every weekday at 10:00 L
 | `CTD.html` | Bond futures CTD model: CTD probabilities, fair futures and fair net basis from a parametric normal model; draggable generic curve with drift and vol per point; editable basket, bonds can be added |
 | `BMNT.html` | Bond monitor: every nominal UST, Bund, OAT and BTP with realised vol, 3m carry and roll down, editable repo curve with boxing premium, futures fly hedge and hedged returns, recent and upcoming auctions |
 | `EURX.html` | Eurex EFP gross basis and EFS invoice spreads, trade by trade |
+| `DTCC.html` | USD SOFR, EUR 6M Euribor / €STR and GBP SONIA swaps reported to the DTCC repository, every day archived, trade by trade at the key-rate tenors or grouped into key-rate brackets: flow by tenor, hour and venue, spot VWAPs; trade types (outright, curve, fly, swap spread, invoice); DTCC trades vs the Eurex Clearing par rates; USD swap spread (DTCC SOFR − Treasury par, time-matched) |
+| `CFTC.html` | Treasury futures positioning from the CFTC Commitments of Traders (asset managers, leveraged funds, dealers), weekly since 2006, in contracts, DV01 or 10Y equivalents |
 | `FIHG.html` | DV01 hedge calculator with futures or bonds, single or fly |
 | `GP.html` | History of bond yields, prices and asset swap spreads, generic yields, swap rates, Eurex futures, gross basis, invoice spreads and WIRP pricing; formulas over the series (spreads, flies), line chart, scatter with OLS regression, rolling and matrix correlation |
 | `WIRP.html` | Fed, ECB and BoE moves priced meeting by meeting by the OIS curves |
@@ -35,12 +38,15 @@ Their code is in `assets/risk/`; they read `data/curves.json` and `data/fx.json`
 | Bund prices and yields | Bundesbank prices and yields of listed Federal securities | daily |
 | OAT and BTP prices | Borsa Italiana MOT / EuroMOT closing prices | daily, previous close |
 | Swap curves (SOFR, Fed funds, €STR, 6M Euribor, SONIA) | Eurex Clearing (EurexOTC Clear) daily settlement curves | daily, previous close |
+| Swap trades (USD SOFR, EUR 6M Euribor / €STR, GBP SONIA) | DTCC public price dissemination, CFTC cumulative rates report (swaps with a US party) | daily, previous US business day; last 5 days re-read; archived from 2026-10-13 |
+| Treasury par yields (swap spreads) | US Treasury Daily Treasury Par Yield Curve Rates (about 15:30 New York) | daily, previous US business day |
 | Policy rates | NY Fed (EFFR, target range), ECB Data Portal (deposit rate, €STR), Bank of England database (Bank Rate, SONIA) | daily |
 | Meeting dates | federalreserve.gov, ecb.europa.eu, bankofengland.co.uk | on each refresh |
 | Repo proxy | NY Fed SOFR and Treasury bill curve; ECB €STR and AAA government spot curve | daily |
 | Eurex baskets and conversion factors | Eurex notified deliverable bonds file | on each refresh |
 | Eurex EFP and EFS trades | Eurex trading files (EFP-Fin, EFS) | daily |
 | Auctions | TreasuryDirect, Finanzagentur, MEF; France from AFT's standing calendar | daily |
+| Treasury futures positioning | CFTC Commitments of Traders, Traders in Financial Futures (futures only), publicreporting.cftc.gov | weekly: Tuesday positions, released Friday 15:30 New York |
 | FX reference rates (USD, GBP, JPY, CHF, SGD, AUD; AED from the USD peg) | ECB euro foreign exchange reference rates | daily |
 
 ## Layout
@@ -50,11 +56,13 @@ Their code is in `assets/risk/`; they read `data/curves.json` and `data/fx.json`
   and one `page-*.js` per page.
 - `data/`: everything the pages read. `markets/<UST|DE|FR|IT>.json` (bonds with ASW, benchmarks, curves, repo proxy),
   `futures.json` (front contracts and baskets), `auctions.json` (recent and upcoming auctions and syndications), `eurex_trades.json`,
-  `curves.json` (OIS and IBOR discount factors), `wirp.json` (policy pricing), `gp/` (histories for the GP page), `meta.json` (refresh status).
+  `curves.json` (OIS and IBOR discount factors), `wirp.json` (policy pricing), `dtcc/` (DTCC swap trades, one file per currency and day,
+  kept for good, and `summary.json` with the Eurex check), `spreads.json` (latest USD swap spreads), `gp/` (histories for the GP page), `meta.json` (refresh status).
   `data/eurex/` archives Eurex's daily trade files (Eurex lists only ~20 days) and `data/history/`
   the yield histories (UST is queried one date at a time; Bund, OAT and BTP sources serve only months),
   the archived ASW, par swap rates (1–30Y, used by TEST), policy pricing and Eurex conversion factors, none of which the sources
-  keep. Do not delete either.
+  keep, plus Treasury par yields (`UST_par.csv`), daily DTCC VWAPs (`dtcc.csv`) and DTCC flow by currency, index and tenor
+  (`dtcc_flow.csv`). Do not delete these, or `data/dtcc/`: DTCC may stop serving old files.
 - `scripts/`: the Python builders. `refresh.py` runs them all; each step that fails keeps its previous
   file and is flagged in the site's status bar.
 

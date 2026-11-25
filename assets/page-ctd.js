@@ -28,7 +28,7 @@ function priceText(market, x) {
 
 function start(contracts, markets) {
   const codes = MARKETS.map((m) => m.code);
-  let mcode = hashParam("m", "DE", codes);
+  let mcode = hashParam("m", "UST", codes);
   let ccode = hashParam("c", null, FUTURES_BY_MARKET[mcode]) ?? defaultContract(mcode);
   const nodes = {};            // market -> generic curve points {t, base, y, drift, vol}
   const inputs = {};           // contract -> bond id -> {y (before curve shift), beta, cf}

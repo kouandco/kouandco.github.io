@@ -152,9 +152,9 @@ function start(data) {
   const base = Object.fromEntries(Object.entries(data.curves).map(([k, v]) => [k, baseCurve(asOf, v)]));
 
   const state = {
-    ccy: "EUR", idx: "E6M", notional: 10_000_000, pay: true, solve: "fixed",
+    ccy: "USD", idx: "SOFR", notional: 10_000_000, pay: true, solve: "fixed",
     start: spot, end: addMonths(spot, 60), tenor: "5Y",
-    fixed: null, spread: 0, fixedFreq: 12, fixedDc: "30/360", floatFreq: 6, floatDc: "ACT/360",
+    fixed: null, spread: 0, fixedFreq: 12, fixedDc: "ACT/360", floatFreq: 12, floatDc: "ACT/360",
     z: {},        // index code -> zero-rate shift at each curve point (decimal)
     target: {},   // index code -> edited par rates at the curve points (%), null = market
   };

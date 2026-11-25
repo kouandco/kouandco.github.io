@@ -6,6 +6,8 @@ export const PAGES = [
   { code: "CTD", href: "CTD.html", title: "Bond Futures CTD" },
   { code: "BMNT", href: "BMNT.html", title: "Bond Monitor" },
   { code: "EURX", href: "EURX.html", title: "Eurex Flow" },
+  { code: "DTCC", href: "DTCC.html", title: "Swap Flow" },
+  { code: "CFTC", href: "CFTC.html", title: "Treasury Positioning" },
   { code: "FIHG", href: "FIHG.html", title: "Fixed Income Hedge" },
   { code: "GP", href: "GP.html", title: "Historical Graphs" },
   { code: "WIRP", href: "WIRP.html", title: "Policy Rate Pricing" },
@@ -65,7 +67,7 @@ export function frame(code) {
   loadJSON("data/meta.json").then((meta) => {
     const failed = Object.entries(meta.steps).filter(([, s]) => !s.ok);
     status.replaceChildren(
-      el("span", {}, `Data refreshed ${meta.refreshed} (weekdays at 10:00 London)`),
+      el("span", {}, `Data refreshed ${meta.refreshed} (weekdays at 10:00, 19:00 and 23:30 London)`),
       codeNote,
       ...failed.map(([name, s]) => el("span", { class: "bad", title: s.error }, `${name}: refresh failed, showing data from ${s.lastGood ?? "earlier"}`)));
   }).catch(() => status.replaceChildren("Data status unavailable", codeNote));

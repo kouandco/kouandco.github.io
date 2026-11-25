@@ -159,9 +159,90 @@ def ns_fit(t, y, tau=NS_TAU):
     return {"kind": "flat", "beta": [float(np.mean(y))]}
 
 
+# Svensson: Nelson-Siegel plus a second hump. The two decays are chosen on a grid (the betas are then linear
+# least squares), so the curve can bend at both the short end and the long end. Bonds that sit far off the curve
+# for structural reasons (old high-coupon lines, off-the-runs trading rich) are trimmed from the fit by a robust
+# rule (more than 4 × the median absolute deviation and at least 3bp away), so they do not drag the curve.
+SV_TAU1 = np.geomspace(0.3, 6, 14)
+SV_TAU2 = np.geomspace(4, 30, 12)
+
+
+def sv_basis(t, tau1, tau2):
+    t = np.maximum(np.asarray(t, dtype=float), 1e-6)
+    x1, x2 = t / tau1, t / tau2
+    f1, f2 = (1 - np.exp(-x1)) / x1, (1 - np.exp(-x2)) / x2
+    return np.column_stack([np.ones_like(t), f1, f1 - np.exp(-x1), f2 - np.exp(-x2)])
+
+
+def _sv_lstsq(t, y, taus):
+    best = None
+    for a, b in taus:
+        X = sv_basis(t, a, b)
+        beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+        sse = float(((y - X @ beta) ** 2).sum())
+        if best is None or sse < best[0]:
+            best = (sse, a, b, beta)
+    return best[1:]
+
+
+def curve_fit(t, y, taus=None):
+    """The government curve through bond yields (%): Svensson with grid-searched decays (or the given `taus`,
+    for fast daily refits), robustly trimmed. Returns (fit, keep mask). Few bonds: Nelson-Siegel, linear, flat."""
+    t, y = np.asarray(t, float), np.asarray(y, float)
+    keep = np.ones(len(t), bool)
+    if len(t) < 10 or t.max() - t.min() < 5:
+        return ns_fit(t, y), keep
+    grid = [taus] if taus else [(a, b) for a in SV_TAU1 for b in SV_TAU2 if b >= 1.5 * a]
+    for _ in range(3):
+        a, b, beta = _sv_lstsq(t[keep], y[keep], grid)
+        r = y - sv_basis(t, a, b) @ beta
+        mad = 1.4826 * np.median(np.abs(r[keep] - np.median(r[keep])))
+        new = np.abs(r) < max(4 * mad, 0.03)
+        if new.sum() < 10 or (new == keep).all():
+            break
+        keep = new
+    a, b, beta = _sv_lstsq(t[keep], y[keep], grid)
+    return {"kind": "sv", "tau": [round(float(a), 4), round(float(b), 4)], "beta": [float(v) for v in beta]}, keep
+
+
+SPREAD_KNOTS = (0, 1, 2, 3, 5, 7, 10, 12, 15, 17, 20, 25, 30, 50)
+
+
+def _hat(t, knots):
+    """Piecewise-linear interpolation weights of t on the knots (flat beyond the ends)."""
+    t = np.clip(np.asarray(t, float), knots[0], knots[-1])
+    w = np.zeros((len(t), len(knots)))
+    j = np.clip(np.searchsorted(knots, t, side="right") - 1, 0, len(knots) - 2)
+    x = (t - knots[j]) / (knots[j + 1] - knots[j])
+    w[np.arange(len(t)), j] = 1 - x
+    w[np.arange(len(t)), j + 1] = x
+    return w
+
+
+def sector_spread(t, r, smooth=1.0):
+    """An issue type's gap to the market curve (bp) as a smooth piecewise-linear function of maturity: knots
+    within the type's range and a penalty on their second differences. Captures sectors such as old 30-year bonds
+    trading rich in the 10-15 year area while new long bonds sit on the curve. Not trimmed: those clusters are
+    exactly what it should follow (bad prints are dropped before, at 40bp)."""
+    t, r = np.asarray(t, float), np.asarray(r, float)
+    lo, hi = t.min(), t.max()
+    knots = np.unique(np.r_[lo, [k for k in SPREAD_KNOTS if lo < k < hi], hi]) if hi - lo > 0.5 else np.array([lo, lo + 1])
+    n = len(knots)
+    D = np.diff(np.eye(n), 2, axis=0) if n > 2 else np.zeros((0, n))
+    A = np.vstack([_hat(t, knots), np.sqrt(smooth) * D, 1e-3 * np.eye(n)])
+    s, *_ = np.linalg.lstsq(A, np.r_[r, np.zeros(len(D) + n)], rcond=None)
+    return {"t": [round(float(k), 3) for k in knots], "s": [round(float(v), 2) for v in s]}
+
+
 def curve_eval(fit, t):
     t = np.asarray(t, float)
     b = fit["beta"]
+    if fit.get("spread"):   # an issue type's curve: market curve + its sector spread (bp)
+        sp = fit["spread"]
+        base = curve_eval({k: v for k, v in fit.items() if k != "spread"}, t)
+        return base + _hat(np.atleast_1d(t), np.array(sp["t"])) @ np.array(sp["s"]) / 100
+    if fit["kind"] == "sv":
+        return sv_basis(t, *fit["tau"]) @ np.array(b)
     if fit["kind"] == "ns":
         return ns_basis(t, fit["tau"]) @ np.array(b)
     if fit["kind"] == "linear":

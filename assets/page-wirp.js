@@ -32,7 +32,9 @@ function decisionLabel(change) {
 }
 
 function start(wirp, hist, policy) {
-  const state = { bank: hashParam("b", "Fed", BANKS.map((b) => b.code)) };
+  const dots = wirp.banks.Fed.dots ?? [];
+  const sepDates = dots.map((d) => d.date);
+  const state = { bank: hashParam("b", "Fed", BANKS.map((b) => b.code)), sep: hashParam("s", sepDates.at(-1) ?? null, sepDates) };
   // Implied rate per meeting on an earlier snapshot, to show how pricing moved.
   const prevIndex = hist && hist.dates.length > 1 ? hist.dates.length - 2 : null;
   const weekIndex = hist ? hist.dates.findLastIndex((d) => d <= shiftDays(wirp.curveDate, -7)) : -1;
@@ -60,7 +62,7 @@ function start(wirp, hist, policy) {
   }));
 
   function render() {
-    setHash({ b: state.bank });
+    setHash(state.bank === "Fed" && state.sep ? { b: state.bank, s: state.sep } : { b: state.bank });
     const b = wirp.banks[state.bank];
     const rows = b.meetings.map((m) => ({
       ...m,
@@ -71,20 +73,38 @@ function start(wirp, hist, policy) {
     // One table, oldest first: decisions taken over two years, a marker for today, then the moves priced ahead.
     const past = [...(b.decisions ?? [])].sort((x, y) => (x.date < y.date ? -1 : 1));
     const showPrev = prevIndex != null, showWeek = weekIndex >= 0 && weekIndex !== prevIndex;
-    const boe = state.bank === "BoE";
-    const head = ["Meeting", "Effective", "Status", "Rate after / implied %", "Move bp", "Moves", "Outcome / probability", "Cumulative from today bp",
-      showPrev ? `Δ vs ${hist.dates[prevIndex]} bp` : null, showWeek ? "Δ 1w bp" : null, boe ? "MPC vote" : null, "Statement"].filter(Boolean);
+    const boe = state.bank === "BoE", fed = state.bank === "Fed";
+    const sepOf = new Map(dots.map((d) => [d.date, d]));
+    // Dot plot summary for a meeting with projections: median (low–high) at the end of the meeting's year, the next
+    // year and the longer run.
+    const dotCell = (d, k) => {
+      const sep = sepOf.get(d.date);
+      const lab = sep && (k === 2 ? "Longer run" : String(+d.date.slice(0, 4) + k));
+      const st = sep?.stats[lab];
+      return el("td", { class: "l", title: st ? `${lab}: median ${st.median.toFixed(3)}%, range ${st.low.toFixed(3)}–${st.high.toFixed(3)}%, ${st.n} participants` : null },
+        st ? el("span", { style: { whiteSpace: "nowrap" } }, el("b", {}, st.median.toFixed(2)), el("span", { class: "muted", style: { fontSize: "0.85em" } }, ` ${st.low.toFixed(2)}–${st.high.toFixed(2)}`)) : "");
+    };
+    // Columns: [label, footnote, hover title, left-aligned]. Units and definitions are in the footnotes below the table.
+    const head = [["Meeting", null, null, true], ["Eff.", "eff", "Date the decision takes effect", true], ["Rate %", "rate", "Rate after the decision / implied rate"],
+      ["Δ bp", null, "Move at the meeting (bp)"], ["Moves", "moves", "Move ÷ 25bp"], ["Outcome", "outcome", "Decision / probability of the priced move", true],
+      ["Cum.", "cum", "Cumulative move priced from today (bp)"],
+      showPrev ? ["Δ1d", "delta", `Change in the implied rate since ${hist.dates[prevIndex]} (bp)`] : null, showWeek ? ["Δ1w", "delta", "Change in the implied rate over a week (bp)"] : null,
+      boe ? ["Vote", "vote", "MPC vote", true] : null,
+      ...(fed ? [["YE", "dots", "Dots: end of the meeting's year", true], ["YE+1", "dots", "Dots: end of the next year", true], ["LR", "dots", "Dots: longer run", true]] : []),
+      ["", null, null, true]].filter(Boolean);
+    const noteNo = {};
+    for (const [, n] of head) if (n && !(n in noteNo)) noteNo[n] = Object.keys(noteNo).length + 1;
     const moveCls = (bp) => (bp > 0.5 ? "neg" : bp < -0.5 ? "pos" : "");
     const pad = (n) => Array.from({ length: n }, () => el("td", {}, ""));
     const todayRow = el("tr", { class: "hl" }, el("td", { class: "l amber", colspan: head.length },
       `Today (curves of ${dayLabel(wirp.curveDate)}): ${b.policyLabel}`));
     const table = el("div", { class: "table-wrap tall" }, el("table", {},
-      el("thead", {}, el("tr", {}, head.map((h, i) => el("th", { class: [0, 1, 2, 6].includes(i) || h === "Statement" ? "l" : "" }, h)))),
+      el("thead", {}, el("tr", {}, head.map(([h, n, title, left]) => el("th", { class: left ? "l" : "", title }, h, n ? el("sup", { class: "muted" }, String(noteNo[n])) : null)))),
       el("tbody", {},
-        past.map((d) => el("tr", {},
-          el("td", { class: "l" }, dayLabel(d.date)),
+        past.map((d) => el("tr", fed && sepOf.has(d.date)
+          ? { class: d.date === state.sep ? "hl" : null, style: { cursor: "pointer" }, title: "Show this meeting's dot plot", onclick: () => { state.sep = d.date; render(); } } : {},
+          el("td", { class: "l", style: { whiteSpace: "nowrap" } }, shortDay(d.date), fed && sepOf.has(d.date) ? el("span", { class: "amber small", title: "Summary of Economic Projections: click for the dot plot" }, " ●") : null),
           el("td", { class: "l muted" }, ""),
-          el("td", { class: "l muted" }, "Decided"),
           el("td", {}, d.after),
           el("td", { class: moveCls(d.change) }, fmt.s(d.change, 0)),
           el("td", {}, fmt.s(d.change / STEP, 2)),
@@ -92,12 +112,12 @@ function start(wirp, hist, policy) {
           el("td", {}, ""),
           ...pad(showPrev + showWeek),
           boe ? el("td", {}, d.vote ?? "–") : null,
-          el("td", { class: "l" }, el("a", { href: d.link, target: "_blank", rel: "noopener" }, linkLabel(state.bank))))),
+          ...(fed ? [0, 1, 2].map((k) => dotCell(d, k)) : []),
+          el("td", { class: "l" }, el("a", { href: d.link, target: "_blank", rel: "noopener", title: linkLabel(state.bank), onclick: (e) => e.stopPropagation() }, "↗")))),
         todayRow,
         rows.map((r) => el("tr", { class: "upcoming" },
-          el("td", { class: "l" }, dayLabel(r.date)),
-          el("td", { class: "l muted" }, dayLabel(r.effective)),
-          el("td", { class: "l" }, "Priced"),
+          el("td", { class: "l", style: { whiteSpace: "nowrap" } }, shortDay(r.date)),
+          el("td", { class: "l muted", style: { whiteSpace: "nowrap" } }, shortDay(r.effective)),
           el("td", {}, r.implied.toFixed(3)),
           el("td", { class: moveCls(r.change) }, fmt.s(r.change, 1)),
           el("td", {}, fmt.s(r.change / STEP, 2)),
@@ -106,6 +126,7 @@ function start(wirp, hist, policy) {
           showPrev ? el("td", {}, fmt.s(r.d1(r.prev), 1)) : null,
           showWeek ? el("td", {}, fmt.s(r.d1(r.week), 1)) : null,
           boe ? el("td", {}, "") : null,
+          ...(fed ? pad(3) : []),
           el("td", { class: "l" }, ""))))));
     // Open the table with today near the top: the priced meetings in view, past decisions a scroll up.
     requestAnimationFrame(() => { table.scrollTop = Math.max(0, todayRow.offsetTop - 120); });
@@ -113,6 +134,7 @@ function start(wirp, hist, policy) {
     const pathChart = el("div", { class: "plot" });
     const cumChart = el("div", { class: "plot" });
     const fwdChart = el("div", { class: "plot" });
+    const dotPanel = fed && dots.length ? dotPlot(dots, state, b, wirp.curveDate, () => render()) : null;
     body.replaceChildren(
       el("div", { class: "tiles" },
         tile("Policy rate", b.policyLabel),
@@ -122,10 +144,19 @@ function start(wirp, hist, policy) {
       el("section", { class: "panel" }, el("h2", {}, `${b.name}: policy rate over two years and the path priced ahead`), pathChart),
       el("section", { class: "panel" },
         el("h2", {}, `Meeting by meeting: ${past.filter((d) => d.change).length} moves in the last ${past.length} meetings, then the path priced ahead`), table,
-        el("p", { class: "note" }, "Decided: rate after the decision from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate), "
-          + `with a link to the statement${boe ? "; MPC vote majority–minority, or unanimous" : ""}. `
-          + `Priced: implied rate from the OIS curve. Moves = bp ÷ ${STEP}. Probability reads a priced move as a share of one ${STEP}bp step, `
-          + "e.g. +20bp = 80% of a hike; it ignores larger or opposite moves and any term premium in the OIS curve.")),
+        footnotes(noteNo, {
+          eff: "Eff.: the date a priced decision takes effect (the Fed: the day after; ECB: the following Wednesday; BoE: the same day). "
+            + "Rows above Today are decided, below are priced by the OIS curve.",
+          rate: "Rate: after the decision, from the official series (NY Fed target range, ECB deposit facility rate, Bank Rate); priced rows: the implied rate.",
+          moves: `Moves: the move in bp ÷ ${STEP}.`,
+          outcome: `Outcome: the decision; for priced rows the move as a share of one ${STEP}bp step, e.g. +20bp = 80% of a hike (ignores larger or opposite moves and term premium).`,
+          cum: "Cum.: cumulative move priced from today's policy rate, bp.",
+          delta: `Δ1d / Δ1w: change in the implied rate since the previous curve${showPrev ? ` (${hist.dates[prevIndex]})` : ""} / a week ago, bp.`,
+          vote: "Vote: MPC majority–minority, or unanimous.",
+          dots: "Dots: FOMC participants' projected midpoint of the target range at the end of the meeting's year (YE), the next year (YE+1) and the longer run (LR): "
+            + "median in bold, then the lowest–highest dot (rounded to 2 decimals; the dot plot below has 3). Only at meetings with a Summary of Economic Projections (●); click such a row for its dot plot.",
+        }, `↗: ${linkLabel(state.bank)}.`)),
+      dotPanel,
       el("div", { class: "grid cols-2" },
         el("section", { class: "panel" }, el("h2", {}, "Cumulative move priced: Fed, ECB, BoE"), cumChart),
         el("section", { class: "panel" }, el("h2", {}, "1-week forward overnight rate (OIS)"), fwdChart)));
@@ -164,6 +195,61 @@ function start(wirp, hist, policy) {
     }), { yaxis: { title: { text: "%" }, tickformat: ".2f" } });
   }
   render();
+}
+
+// FOMC dot plot of the chosen SEP meeting: one dot per participant at each year-end and the longer run (dots at the
+// same rate side by side, as the Fed draws them), the median, and today's OIS-implied rate at each year-end.
+function dotPlot(dots, state, b, curveDate, rerender) {
+  const sep = dots.find((d) => d.date === state.sep) ?? dots.at(-1);
+  const pick = el("select", {}, [...dots].reverse().map((d) => el("option", { value: d.date, selected: d.date === sep.date || null }, `${dayLabel(d.date)} SEP`)));
+  pick.addEventListener("change", () => { state.sep = pick.value; rerender(); });
+  const chart = el("div", { class: "plot" });
+  const xs = [], ys = [], txt = [];
+  sep.years.forEach((lab, j) => {
+    for (const [rate, n] of sep.dots[lab]) {
+      for (let k = 0; k < n; k++) { xs.push(j + (k - (n - 1) / 2) * 0.06); ys.push(rate); txt.push(`${lab}: ${rate.toFixed(3)}% · ${n} participant${n > 1 ? "s" : ""}`); }
+    }
+  });
+  const med = sep.years.map((lab) => sep.stats[lab]?.median ?? null);
+  // Today's pricing: implied rate after the last meeting of each projection year (the Fed path is on the mid of the range).
+  const implied = sep.years.map((lab) => {
+    if (!/^\d{4}$/.test(lab) || +lab < +curveDate.slice(0, 4)) return null;
+    const last = b.meetings.filter((m) => m.date.slice(0, 4) === lab).at(-1);
+    return last ? last.implied : +lab === +curveDate.slice(0, 4) ? b.policy : null;
+  });
+  const idx = sep.years.map((_, j) => j);
+  requestAnimationFrame(() => plot(chart, [
+    { x: xs, y: ys, mode: "markers", type: "scatter", name: "Participant", marker: { size: 9, color: "#4da3ff", line: { width: 0 } }, text: txt, hovertemplate: "%{text}<extra></extra>" },
+    { x: idx, y: med, mode: "markers", name: "Median", marker: { symbol: "line-ew-open", size: 34, line: { width: 3, color: "#ffb000" } },
+      text: sep.years, hovertemplate: "%{text} median: %{y:.3f}%<extra></extra>" },
+    { x: idx, y: implied, mode: "markers+lines", name: `OIS implied (${dayLabel(curveDate)})`, line: { color: "#ff5c5c", dash: "dot", width: 1.5 },
+      marker: { symbol: "diamond", size: 9, color: "#ff5c5c" }, connectgaps: false, text: sep.years, hovertemplate: "%{text} year-end priced: %{y:.3f}%<extra></extra>" },
+  ], { xaxis: { tickvals: idx, ticktext: sep.years, range: [-0.6, sep.years.length - 0.4], zeroline: false },
+    yaxis: { title: { text: "Midpoint of target range (%)" }, tickformat: ".2f", dtick: 0.25 }, legend: { orientation: "h", y: -0.12 } }, 420));
+  const table = el("div", { class: "table-wrap" }, el("table", { class: "compact" },
+    el("thead", {}, el("tr", {}, el("th", { class: "l" }, ""), sep.years.map((y) => el("th", {}, y)))),
+    el("tbody", {},
+      [["Median", "median"], ["Lowest", "low"], ["Highest", "high"]].map(([k, f]) => el("tr", {}, el("td", { class: "l" }, k),
+        sep.years.map((y) => el("td", {}, sep.stats[y] ? sep.stats[y][f].toFixed(3) : "–")))),
+      el("tr", {}, el("td", { class: "l" }, "Participants"), sep.years.map((y) => el("td", {}, sep.stats[y]?.n ?? "–"))),
+      el("tr", {}, el("td", { class: "l" }, "OIS implied now"), implied.map((v) => el("td", {}, v == null ? "–" : v.toFixed(3)))))));
+  return el("section", { class: "panel" },
+    el("div", { class: "row", style: { justifyContent: "space-between", alignItems: "center" } },
+      el("h2", {}, `FOMC dot plot: ${dayLabel(sep.date)}`),
+      el("span", { class: "row", style: { gap: "8px" } }, pick, el("a", { href: sep.link, target: "_blank", rel: "noopener", class: "small" }, "SEP tables"))),
+    el("div", { class: "grid cols-2" }, chart, el("div", {}, table,
+      el("p", { class: "note" }, "Each dot is one participant's projected midpoint of the federal funds target range (or target level) at the end of the year, "
+        + "rounded to the nearest 1/8 point. Median: the middle participant (the Fed's convention). OIS implied: today's priced rate after the last FOMC of "
+        + "that year, for comparison."))));
+}
+
+function footnotes(noteNo, text, extra) {
+  return el("ol", { class: "small muted", style: { margin: "6px 0 0", paddingLeft: "18px" } },
+    Object.keys(noteNo).map((k) => el("li", {}, text[k])), extra ? el("li", { style: { listStyle: "none" } }, extra) : null);
+}
+
+function shortDay(d) {
+  return new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "2-digit", timeZone: "UTC" });
 }
 
 function linkLabel(bank) {

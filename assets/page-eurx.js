@@ -319,7 +319,7 @@ function start(trades, contracts, markets) {
 function methodNote() {
   return el("details", { class: "method panel" }, el("summary", {}, "Data and method"),
     el("ul", { class: "small" },
-      el("li", {}, "EFP and EFS trades: Eurex EFP-Fin and EFS trade files. Eurex lists only about 20 trading days, so every file is archived and the archive extended each weekday at 10:00 London. Only the front contract is shown."),
+      el("li", {}, "EFP and EFS trades: Eurex EFP-Fin and EFS trade files. Eurex lists only about 20 trading days, so every file is archived and the archive extended at each weekday refresh (10:00, 19:00 and 23:30 London). Only the front contract is shown."),
       el("li", {}, "CTD and 2nd CTD: deliverables ranked by forward price / conversion factor at the latest closing yields, as on the CTD page. Any other bond swapped against the contract can be picked from the list or the table of bonds traded; non-deliverable bonds are measured as yield spread to the futures-implied CTD yield (bond yield at the EFP cash price, settling T+2), or cash price when the site holds no static data for the bond."),
       el("li", {}, "Gross basis = cash price − futures × CF (cents). It includes carry to delivery, so it drifts down towards the net basis as delivery approaches."),
       el("li", {}, "Invoice spread = swap fixed rate − the CTD yield implied by the futures price, treating futures × CF as the CTD's forward price on the delivery date. Swap tenors in an EFS vary, so compare spreads across trades with similar tenors.")));
