@@ -91,28 +91,16 @@ function start(contracts, markets) {
   const sweepProb = el("div", { class: "plot" });
   const sweepDV01 = el("div", { class: "plot" });
   const sweepNote = el("p", { class: "note" });
+  // Results first; the input graphs (repo to delivery, generic curve) at the bottom.
   app.append(
     title,
     el("div", { class: "row", style: { marginBottom: "8px" } }, marketTabs, contractTabs),
     tiles,
     el("section", { class: "panel", style: { marginTop: "10px" } },
-      el("h2", {}, "CTD repo to delivery, with the boxing option (other deliverables at GC)"),
+      el("h2", {}, "Distribution of the CTD yield at delivery, coloured by CTD"),
       el("div", { class: "grid cols-2", style: { alignItems: "start" } },
-        repoEditorHost,
-        el("div", { class: "stack" }, repoControls,
-          el("p", { class: "note" }, "S/N, S/Box and S/Dlv start on the GC repo curve (proxy); drag them or type the CTD's term repo to delivery "
-            + "(special = GC − CTD repo). The boxing premium is the extra forward rate priced between boxing and delivery (red); typing it moves S/Box "
-            + "with S/Dlv held. The CTD is financed at S/Dlv; the Bond Monitor's net basis uses GC.")))),
-    el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
-      el("section", { class: "panel" },
-        el("div", { class: "row", style: { justifyContent: "space-between" } },
-          el("h2", {}, "Generic curve: yield, drift and volatility by point"),
-          el("button", { class: "btn", onclick: () => { nodes[mcode] = freshNodes(markets[mcode]); refreshCurve(); } }, "Reset curve")),
-        editorHost, nodesHost, spreadsHost),
-      el("section", { class: "panel" },
-        el("h2", {}, "Distribution of the CTD yield at delivery, coloured by CTD"),
-        payoff, switchesHost,
-        el("h2", { style: { marginTop: "8px" } }, "CTD probability"), probs)),
+        el("div", {}, payoff, switchesHost),
+        el("div", {}, el("h2", {}, "CTD probability"), probs))),
     el("section", { class: "panel", style: { marginTop: "10px" } },
       el("h2", {}, "Basis payoff at delivery"), basisCtl,
       el("div", { class: "grid cols-2" }, basisLines, basisLegs), basisNote),
@@ -124,6 +112,18 @@ function start(contracts, markets) {
         el("h2", {}, "Deliverable basket"),
         el("button", { class: "btn", onclick: () => { inputs[ccode] = {}; added[ccode] = []; renderAddForm(); recompute(); } }, "Reset bonds")),
       basketHost, addHost, basketNote, anchorHost),
+    el("div", { class: "grid cols-2", style: { marginTop: "10px", alignItems: "start" } },
+      el("section", { class: "panel" },
+        el("h2", {}, "Input: CTD repo to delivery, with the boxing option (other deliverables at GC)"),
+        repoEditorHost, repoControls,
+        el("p", { class: "note" }, "S/N, S/Box and S/Dlv start on the GC repo curve (proxy); drag them or type the CTD's term repo to delivery "
+          + "(special = GC − CTD repo). The boxing premium is the extra forward rate priced between boxing and delivery (red); typing it moves S/Box "
+          + "with S/Dlv held. The CTD is financed at S/Dlv; the Bond Monitor's net basis uses GC.")),
+      el("section", { class: "panel" },
+        el("div", { class: "row", style: { justifyContent: "space-between" } },
+          el("h2", {}, "Input: generic curve, yield, drift and volatility by point"),
+          el("button", { class: "btn", onclick: () => { nodes[mcode] = freshNodes(markets[mcode]); refreshCurve(); } }, "Reset curve")),
+        editorHost, nodesHost, spreadsHost)),
     methodNote());
 
   const editor = curveEditor({

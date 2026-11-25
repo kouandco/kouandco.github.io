@@ -39,20 +39,52 @@ const BASES = [
 ];
 // Government curve a swap index is expressed against in the Govt + ASW basis (no gilts on the site: SONIA stays on its own curve).
 const SWAP_GOVT = { "USD SOFR": "UST", "EUR €STR": "DE", "EUR 6M": "DE", "GBP SONIA": null };
+// Buckets of the curve risk: key rates (1-30Y), or the futures CTDs as anchor points: a position at maturity t is
+// split between the two CTDs either side of it (all to the nearest beyond the ends), so each bucket is the risk a
+// contract hedges. USD and GBP use the Treasury contracts' CTDs, EUR the German ones.
+const BUCKETS = [{ code: "kr", label: "Key rates" }, { code: "ctd", label: "Futures CTDs" }];
+const CTD_SLOTS = [["2Y", "TU", "DU"], ["5Y", "FV", "OE"], ["10Y", "TY", "RX"], ["Ultra 10Y", "UXY", null], ["Bond", "US", null], ["Ultra bond", "WN", "UB"]];
+let bucketCode = (() => { try { return localStorage.getItem("blotBuckets") ?? "kr"; } catch { return "kr"; } })();
+function bucketing(code) {
+  if (code !== "ctd") return { code: "kr", labels: KR.map((k) => `${k}Y`), weights: (ccy, t) => krWeights(t) };
+  const anchors = {};
+  const anchorsFor = (ccy) => (anchors[ccy] ??= CTD_SLOTS.map(([, us, eu], i) => {
+    const c = ccy === "€" ? eu : us;
+    return c && U.futs[c] ? { i, t: U.futs[c].t } : null;
+  }).filter(Boolean).sort((a, b) => a.t - b.t));
+  return {
+    code: "ctd",
+    labels: CTD_SLOTS.map(([, us, eu]) => (eu ? `${us} · ${eu}` : us)),
+    titles: CTD_SLOTS.map(([slot, us, eu]) => `${slot}: ${[us, eu].filter(Boolean).map((c) => `${c} CTD ${U.futs[c]?.ctd.name ?? "–"} (${U.futs[c]?.t.toFixed(1) ?? "–"}y)`).join(", ")}`),
+    weights: (ccy, t) => {
+      const a = anchorsFor(ccy), w = CTD_SLOTS.map(() => 0);
+      if (!a.length) return w;
+      if (t <= a[0].t) { w[a[0].i] = 1; return w; }
+      if (t >= a.at(-1).t) { w[a.at(-1).i] = 1; return w; }
+      const j = a.findIndex((x, k) => t >= x.t && t <= a[k + 1].t);
+      const x = (t - a[j].t) / (a[j + 1].t - a[j].t);
+      w[a[j].i] = 1 - x; w[a[j + 1].i] = x;
+      return w;
+    },
+  };
+}
 let basisCode = (() => { try { return localStorage.getItem("blotBasis") ?? "GA"; } catch { return "GA"; } })();
 const posBox = el("div"), tiles = el("div", { class: "tiles" });
 const tables = { curves: el("div"), basis: el("div") };
 const chart = el("div", { class: "plot" });
+const hedgeBox = el("div");
+const hedge = { mode: "irs", ccy: null, index: {} };   // hedge panel: instruments, currency, IRS index per currency
 
 app.append(
   el("div", { class: "page-title" }, el("h1", {}, "Portfolio risk"),
     el("span", { class: "muted" }, "value change for a 1bp rise in one point, everything else unchanged · portfolio saved in this browser")),
   el("section", { class: "panel" }, el("h2", {}, "Positions"), posBox),
   el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Totals"), tiles),
-  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Curve risk: ΔV for +1bp at each maturity"), tables.curves),
+  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Curve risk: ΔV for +1bp at each point"), tables.curves),
   el("div", { class: "grid cols-2", style: { marginTop: "10px" } },
     el("section", { class: "panel" }, el("h2", {}, "Bond futures gross basis: ΔV for +1 tick"), tables.basis),
     el("section", { class: "panel" }, el("h2", {}, "Rate risk by bucket"), chart)),
+  el("section", { class: "panel", style: { marginTop: "10px" } }, el("h2", {}, "Hedge: curve risk"), hedgeBox),
   methodNote());
 
 loadUniverse().then((u) => { U = u; book = load() ?? sample(); render(); }).catch((e) => showError(app, e));
@@ -61,9 +93,9 @@ function bondNear(market, t, needAsw) {
   return [...U.bonds.values()].filter((b) => b.market === market && (!needAsw || b.asw != null)).sort((a, b) => Math.abs(a.t - t) - Math.abs(b.t - t))[0].id;
 }
 function defaultLeg(type, market = "UST") {
-  if (type === "bond" || type === "asw") return { type, market, id: bondNear(market, 10, type === "asw"), side: 1, qtyMode: "notional", qty: 10e6 };
-  if (type === "fut") return { type, id: Object.keys(U.futs).find((k) => U.futs[k].market === market) ?? Object.keys(U.futs)[0], side: 1, qtyMode: "notional", qty: 100 };
-  return { type, id: "USD SOFR", tenor: 10, fixed: null, side: 1, qtyMode: "dv01", qty: 10000 };
+  if (type === "bond" || type === "asw") return { type, market, id: bondNear(market, 10, type === "asw"), side: 1, qtyMode: "notional", qty: 100e6 };
+  if (type === "fut") return { type, id: Object.keys(U.futs).find((k) => U.futs[k].market === market) ?? Object.keys(U.futs)[0], side: 1, qtyMode: "notional", qty: 1000 };
+  return { type, id: "USD SOFR", tenor: 10, fixed: null, side: 1, qtyMode: "notional", qty: 100e6 };
 }
 // Example book: US Treasuries hedged two ways, each hedge DV01-matched to its bond:
 // the TY CTD bought against sold TY futures (a basis position), and a 5Y Treasury bought against a SOFR payer
@@ -73,10 +105,10 @@ function sample() {
   const swapBond = bondNear("UST", 5, false);
   const dv = (id, qty) => Math.round((qty * U.bonds.get(id).dv01) / 100);
   return [
-    { ...defaultLeg("bond", "UST"), id: futBond, qty: 50e6, trade: "TY basis: CTD vs futures" },
-    { ...defaultLeg("fut", "UST"), id: "TY", side: -1, qtyMode: "dv01", qty: dv(futBond, 50e6), trade: "TY basis: CTD vs futures" },
-    { ...defaultLeg("bond", "UST"), id: swapBond, qty: 50e6, trade: "5Y Treasury vs SOFR payer" },
-    { type: "irs", id: "USD SOFR", maturity: U.bonds.get(swapBond).maturity, tenor: 5, fixed: null, side: -1, qtyMode: "dv01", qty: dv(swapBond, 50e6), trade: "5Y Treasury vs SOFR payer" },
+    { ...defaultLeg("bond", "UST"), id: futBond, qty: 100e6, trade: "TY basis: CTD vs futures" },
+    { ...defaultLeg("fut", "UST"), id: "TY", side: -1, qtyMode: "dv01", qty: dv(futBond, 100e6), trade: "TY basis: CTD vs futures" },
+    { ...defaultLeg("bond", "UST"), id: swapBond, qty: 100e6, trade: "5Y Treasury vs SOFR payer" },
+    { type: "irs", id: "USD SOFR", maturity: U.bonds.get(swapBond).maturity, tenor: 5, fixed: null, side: -1, qtyMode: "dv01", qty: dv(swapBond, 100e6), trade: "5Y Treasury vs SOFR payer" },
   ];
 }
 
@@ -106,27 +138,14 @@ function select(obj, key, options, { numeric = false, onchange } = {}) {
   return s;
 }
 
-function render() {
-  book = regroup(book);
-  const snap = JSON.stringify(book);
-  if (lastSnap !== null && snap !== lastSnap) {
-    undoStack.push(lastSnap);
-    if (undoStack.length > 100) undoStack.shift();
-    redoStack = [];
-  }
-  lastSnap = snap;
-  save();
-  const pos = book.map((leg) => ({ leg, now: legNow(U, leg) }));
-
-  // ---- risk aggregation. Each position is broken into bond-like exposure (a yield at maturity t in a market:
-  // bonds, the CTD of a future, the bond in an ASW package) and swap-like exposure (a par rate in an index: IRS,
-  // the swap in an ASW package), each with its DV01 D. The basis then maps them onto two independent curves.
-  // ΔV for +1bp = −D.
-  const B = BASES.find((b) => b.code === basisCode) ?? BASES[0];
+// Risk aggregation. Each position is broken into bond-like exposure (a yield at maturity t in a market: bonds,
+// the CTD of a future, the bond in an ASW package) and swap-like exposure (a par rate in an index: IRS, the swap in
+// an ASW package), each with its DV01 D. The basis then maps them onto two independent curves. ΔV for +1bp = −D.
+function riskOf(pos, B, bk = bucketing("kr")) {
   const govt = {}, swap = {}, asw = {}, basis = {};
   const add = (store, key, ccy, t, dv) => {
-    const row = (store[key] ??= { ccy, kr: KR.map(() => 0) });
-    krWeights(t).forEach((w, k) => { row.kr[k] += dv * w; });
+    const row = (store[key] ??= { ccy, kr: bk.labels.map(() => 0) });
+    bk.weights(ccy, t).forEach((w, k) => { row.kr[k] += dv * w; });
   };
   const bondRisk = (m, ccy, t, D) => {
     if (B.code === "SA") { add(swap, ASW_INDEX[m], ccy, t, -D); add(asw, m, ccy, t, -D); }   // yield = swap + ASW
@@ -149,11 +168,37 @@ function render() {
       basis[k] = { ccy: now.ccy, dv: (basis[k]?.dv ?? 0) + dv, tick: tickLabel, ctd: U.futs[leg.id].ctd.name };
     } else swapRisk(leg.id, now.ccy, now.t, now.dv01);
   }
+  return { govt, swap, asw, basis };
+}
+
+// Key-rate rate risk (ΔV for +1bp in each bucket, government and IRS curves together) of one currency.
+function ratesVector(r, ccy, n = KR.length) {
+  const v = Array(n).fill(0);
+  for (const store of [r.govt, r.swap]) for (const row of Object.values(store)) if (row.ccy === ccy) row.kr.forEach((x, k) => { v[k] += x; });
+  return v;
+}
+const sumOf = (store, ccy) => Object.values(store).filter((r) => r.ccy === ccy).reduce((a, r) => a + (r.kr ? r.kr.reduce((x, y) => x + y, 0) : r.dv), 0);
+
+function render() {
+  book = regroup(book);
+  const snap = JSON.stringify(book);
+  if (lastSnap !== null && snap !== lastSnap) {
+    undoStack.push(lastSnap);
+    if (undoStack.length > 100) undoStack.shift();
+    redoStack = [];
+  }
+  lastSnap = snap;
+  save();
+  const pos = book.map((leg) => ({ leg, now: legNow(U, leg) }));
+
+  const B = BASES.find((b) => b.code === basisCode) ?? BASES[0];
+  const BK = bucketing(bucketCode);
+  const { govt, swap, asw, basis } = riskOf(pos, B, BK);
 
   // ---- positions table
   posBox.replaceChildren(
     el("div", { class: "table-wrap" }, el("table", {},
-      el("thead", {}, el("tr", {}, ["Risk", "Type", "Market", "Security", "Side", "Size by", "Quantity", "Fixed %", "Level", "Maturity", "Size", "DV01", "Value", ""]
+      el("thead", {}, el("tr", {}, ["Risk", "Type", "Market", "Security", "Side", "Size by", "Quantity", "Fixed %", "Level", "Maturity", "Yrs", "Size", "DV01", "Value", ""]
         .map((h, i) => el("th", { class: i < 6 ? "l" : "", title: i === 0 ? "Include in the risk below (untick to leave it out without deleting it)" : null }, h)))),
       el("tbody", {}, pos.flatMap(({ leg, now }, i) => {
         const head = leg.trade && leg.trade !== book[i - 1]?.trade ? tradeRow(leg.trade, pos) : null;
@@ -181,6 +226,7 @@ function render() {
           el("td", { class: "edit" }, leg.type === "irs" ? input(leg, "fixed", { step: 0.01, placeholder: now ? now.level.toFixed(4) : "", title: "Blank: at par today" }) : "–"),
           el("td", {}, now ? (leg.type === "asw" ? `${fmt.n(now.level, 1)}bp` : leg.type === "fut" ? now.price.toFixed(3) : `${now.level.toFixed(3)}%`) : "–"),
           el("td", {}, now?.maturity ?? "–"),
+          el("td", { title: leg.type === "fut" ? "Years to the CTD's maturity" : "Years to maturity" }, now?.t != null ? now.t.toFixed(1) : "–"),
           el("td", {}, now ? (leg.type === "fut" ? `${fmt.int(now.lots)} lots` : fmt.ccy(ccy, now.notional)) : "–"),
           el("td", { class: now?.dv01 >= 0 ? "pos" : "neg" }, now ? fmt.ccy(ccy, now.dv01) : "–"),
           el("td", {}, now?.mv ? fmt.ccy(ccy, now.mv) : "–"),
@@ -192,7 +238,7 @@ function render() {
       el("button", { class: "btn", disabled: redoStack.length ? null : true, title: "Redo (⇧⌘Z / Ctrl+Shift+Z)", onclick: redo }, "↷ Redo"),
       el("button", { class: "btn", onclick: () => {
         builder = builder ? null : tradeBuilder(U, {
-          createLabel: "Add to portfolio",
+          createLabel: "Add to portfolio", bondSize: 100, lots: 1000,
           onCreate: ({ legs, name }) => { const trade = uniqueTrade(name); book.push(...legs.map((l) => ({ ...l, trade }))); builder = null; render(); },
           onCancel: () => { builder = null; render(); },
         });
@@ -230,7 +276,9 @@ function render() {
   const codes = MARKETS.map((m) => m.code);
   tables.curves.replaceChildren(
     el("div", { class: "row", style: { marginBottom: "6px" } }, el("span", { class: "amber" }, "Risk basis"),
-      segmented(BASES, B.code, (v) => { basisCode = v; try { localStorage.setItem("blotBasis", v); } catch { /* storage unavailable */ } render(); })),
+      segmented(BASES, B.code, (v) => { basisCode = v; try { localStorage.setItem("blotBasis", v); } catch { /* storage unavailable */ } render(); }),
+      el("span", { class: "amber", style: { marginLeft: "16px" } }, "Buckets"),
+      segmented(BUCKETS, BK.code, (v) => { bucketCode = v; try { localStorage.setItem("blotBuckets", v); } catch { /* storage unavailable */ } render(); })),
     curveTable([
       { id: "govt", label: "Govt", store: govt, keys: codes, ccy: mccy, name: mkt },
       // In Govt + ASW, SONIA has no government curve on the site and keeps its IRS risk.
@@ -238,7 +286,7 @@ function render() {
         name: (k) => ({ "EUR 6M": "Euribor", "EUR €STR": "€STR" })[k] ?? k.split(" ")[1], note: (k) => (k === "EUR 6M" ? 1 : null),
         live: (k) => B.implied !== "swap" || !SWAP_GOVT[k] },
       { id: "asw", label: "ASW", groupNote: 2, store: asw, keys: codes, ccy: mccy, name: mkt },
-    ].map((g) => ({ ...g, implied: g.id === B.implied })), B));
+    ].map((g) => ({ ...g, implied: g.id === B.implied })), B, BK));
   const bRows = Object.values(U.futs).map((f) => {
     const k = `${f.code} ${f.expiry}`;
     return [k, basis[k] ?? { ccy: f.ccy, dv: 0, tick: f.market === "UST" ? "1/32" : "1c", ctd: f.ctd.name }];
@@ -253,18 +301,161 @@ function render() {
 
   // ---- chart: government + swap + ASW risk per bucket, one bar series per curve
   const series = [...Object.entries(govt).map(([k, r]) => [`${k} govt`, r]), ...Object.entries(swap).map(([k, r]) => [`${k} IRS`, r]), ...Object.entries(asw).map(([k, r]) => [`${k} ASW`, r])];
-  plot(chart, series.map(([name, r], i) => ({ x: KR.map((k) => `${k}Y`), y: r.kr, type: "bar", name: `${name} (${r.ccy})`, marker: { color: COLORS[i % COLORS.length] } })),
+  plot(chart, series.map(([name, r], i) => ({ x: BK.labels, y: r.kr, type: "bar", name: `${name} (${r.ccy})`, marker: { color: COLORS[i % COLORS.length] } })),
     { barmode: "group", yaxis: { title: { text: "ΔV for +1bp (each in its currency)" } }, legend: { orientation: "h", y: -0.15 } }, 440);
+  renderHedge(pos, B, { govt, swap, asw, basis }, BK);   // on the same buckets as the table
+}
+
+// ---------------------------------------------------------------- hedge suggestion
+
+// Instruments that can hedge one currency's rate risk: par IRS at every key tenor of an index, or that currency's
+// bond futures (EUR: the German contracts; their CTDs are on the Bund curve).
+const HEDGE_FUTS = { "$": ["TU", "FV", "TY", "UXY", "US", "WN"], "€": ["DU", "OE", "RX", "UB"] };
+const HEDGE_INDEX = { "$": ["USD SOFR"], "€": ["EUR 6M", "EUR €STR"], "£": ["GBP SONIA"] };
+
+// On CTD anchors the IRS run to the anchors' CTD maturities (one per bucket, like the key-rate tenors).
+function hedgeCandidates(ccy, BK) {
+  if (hedge.mode === "irs") {
+    const ix = hedge.index[ccy] ?? HEDGE_INDEX[ccy]?.[0];
+    if (!ix) return [];
+    if (BK.code === "ctd") {
+      const col = ccy === "€" ? 2 : 1;
+      return CTD_SLOTS.map((s) => s[col]).filter((c) => c && U.futs[c]).map((c) => {
+        const mat = U.futs[c].ctd.maturity;
+        return { leg: { type: "irs", id: ix, maturity: mat, tenor: Math.round(U.futs[c].t), fixed: null, side: 1, qtyMode: "notional", qty: 1e6 }, unit: 1e6, label: `${ix} to ${mat} (${c} CTD)` };
+      });
+    }
+    return IRS_TENORS.map((T) => ({ leg: { type: "irs", id: ix, tenor: T, fixed: null, side: 1, qtyMode: "notional", qty: 1e6 }, unit: 1e6, label: `${ix} ${T}Y` }));
+  }
+  return (HEDGE_FUTS[ccy] ?? []).filter((c) => U.futs[c]).map((c) => ({ leg: { type: "fut", id: c, side: 1, qtyMode: "notional", qty: 1 }, unit: 1, label: `${c} ${U.futs[c].expiry}` }));
+}
+
+// Sizes n (units: 1mm notional or 1 lot) minimising the key-rate risk left, |R + V n|² over the buckets, where V
+// holds each instrument's ΔV for +1bp per unit by bucket (a futures contract's at its CTD's maturity, split between
+// the two nearest buckets). An exact least-squares fit, so the whole risk is hedged in one go: what is left cannot be
+// reduced by these instruments, and running the hedge again suggests nothing (beyond rounding). IRS sit on one bucket
+// each, so they offset it exactly. Sizes are rounded to 1mm or 1 lot.
+function solveHedge(R, cands, BK, ccy) {
+  const V = cands.map((c) => {
+    const now = legNow(U, c.leg);
+    return BK.weights(ccy, now.t).map((x) => -now.dv01 * x);
+  });
+  if (!V.length) return [];
+  const norms = V.map((v) => v.reduce((a, x) => a + x * x, 0));
+  const eps = 1e-9 * Math.max(...norms);        // numerical safety only (no shrinkage)
+  const A = V.map((vi, i) => V.map((vj, j) => vi.reduce((a, x, k) => a + x * vj[k], 0) + (i === j ? eps : 0)));
+  const b = V.map((vi) => -vi.reduce((a, x, k) => a + x * R[k], 0));
+  const n = gauss(A, b);
+  return cands.map((c, i) => ({ ...c, n: Math.round(n[i]) })).filter((c) => c.n !== 0);
+}
+
+function gauss(A, b) {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c;
+    for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    [M[c], M[p]] = [M[p], M[c]];
+    if (Math.abs(M[c][c]) < 1e-300) continue;
+    for (let r = 0; r < n; r++) {
+      if (r === c) continue;
+      const f = M[r][c] / M[c][c];
+      for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k];
+    }
+  }
+  return M.map((r, i) => (r[i] ? r[n] / r[i] : 0));
+}
+
+function renderHedge(pos, B, risk, BK) {
+  const nb = BK.labels.length;
+  const ccys = [...new Set(pos.filter((p) => p.now && !p.leg.off).map((p) => p.now.ccy))].filter((c) => ratesVector(risk, c, nb).some((x) => Math.abs(x) >= 1));
+  if (!ccys.length) { hedgeBox.replaceChildren(el("p", { class: "muted" }, "No rate risk to hedge.")); return; }
+  if (!ccys.includes(hedge.ccy)) hedge.ccy = ccys[0];
+  const ccy = hedge.ccy;
+  const R = ratesVector(risk, ccy, nb);
+  const cands = hedgeCandidates(ccy, BK);
+  const picks = solveHedge(R, cands, BK, ccy);
+  const legs = picks.map((p) => ({ ...p.leg, side: Math.sign(p.n), qty: Math.abs(p.n) * p.unit }));
+  const hedged = riskOf([...pos, ...legs.map((leg) => ({ leg, now: legNow(U, leg) }))], B, BK);
+  const left = ratesVector(hedged, ccy, nb);
+  const sumAbs = (v) => v.reduce((a, x) => a + Math.abs(x), 0);
+
+  const controls = el("div", { class: "row", style: { gap: "12px", marginBottom: "8px", flexWrap: "wrap" } },
+    ccys.length > 1 ? segmented(ccys.map((c) => ({ code: c, label: c })), ccy, (c) => { hedge.ccy = c; render(); }) : el("span", { class: "amber" }, ccy),
+    segmented([{ code: "irs", label: "All IRS" }, { code: "fut", label: "All futures" }], hedge.mode, (m) => { hedge.mode = m; render(); }),
+    hedge.mode === "irs" && (HEDGE_INDEX[ccy] ?? []).length > 1
+      ? (() => { const s = el("select", {}, HEDGE_INDEX[ccy].map((k) => el("option", { value: k, selected: k === (hedge.index[ccy] ?? HEDGE_INDEX[ccy][0]) || null }, k)));
+        s.addEventListener("change", () => { hedge.index[ccy] = s.value; render(); }); return s; })() : null);
+  if (!cands.length) {
+    hedgeBox.replaceChildren(controls, el("p", { class: "muted" }, `No ${hedge.mode === "fut" ? "bond futures" : "IRS"} on the site to hedge ${ccy} risk; try the other instruments.`));
+    return;
+  }
+  const table = el("div", { class: "table-wrap" }, el("table", { class: "compact" },
+    el("thead", {}, el("tr", {}, ["Instrument", "Side", "Size", "DV01", "Bucket"].map((h, i) => el("th", { class: i < 2 ? "l" : "" }, h)))),
+    el("tbody", {}, legs.length ? legs.map((leg, i) => {
+      const now = legNow(U, leg);
+      const w = BK.weights(ccy, now.t), main = BK.labels[w.indexOf(Math.max(...w))];
+      return el("tr", {}, el("td", { class: "l" }, picks[i].label), el("td", { class: "l" }, SIDES[leg.type].find((x) => x.v === leg.side).label),
+        el("td", {}, leg.type === "fut" ? `${fmt.int(leg.qty)} lots` : fmt.ccy(ccy, leg.qty)),
+        el("td", { class: now.dv01 >= 0 ? "pos" : "neg" }, fmt.ccy(ccy, now.dv01)), el("td", { style: { whiteSpace: "nowrap" } }, main));
+    }) : el("tr", {}, el("td", { class: "l muted", colspan: 5 }, "Nothing to hedge at this size.")))));
+  // Risk before, of the hedge and after, in one table: key-rate rates risk, then ASW (per market) and futures gross
+  // basis (per contract), the spread and basis risk the hedge leaves or adds.
+  const val = (v, bold) => {
+    const td = el("td", { class: Math.abs(v) < 0.5 ? "" : v > 0 ? "pos" : "neg" }, Math.abs(v) < 0.5 ? "·" : fmt.ccy(ccy, v));
+    if (bold) td.style.fontWeight = "600";
+    return td;
+  };
+  const line = (label, now, after, { bold = false, sub = null } = {}) => el("tr", bold ? { style: { borderTop: "1px solid #3a3a3a" } } : {},
+    el("td", { class: "l" }, bold ? el("b", {}, label) : label, sub ? el("span", { class: "muted small" }, ` ${sub}`) : null),
+    val(now, bold), val(after - now, bold), val(after, bold));
+  const section = (title) => el("tr", {}, el("td", { class: "l amber", colspan: 4, style: { paddingTop: "8px" } }, title));
+  const byKey = (store) => Object.fromEntries(Object.entries(store).filter(([, r]) => r.ccy === ccy).map(([k, r]) => [k, r.kr ? r.kr.reduce((x, y) => x + y, 0) : r.dv]));
+  const aswNow = byKey(risk.asw), aswAfter = byKey(hedged.asw);
+  const basNow = byKey(risk.basis), basAfter = byKey(hedged.basis);
+  const keys = (x, y) => [...new Set([...Object.keys(x), ...Object.keys(y)])].filter((k) => Math.abs(x[k] ?? 0) >= 0.5 || Math.abs(y[k] ?? 0) >= 0.5);
+  const tot = (v) => v.reduce((a, x) => a + x, 0);
+  const aswKeys = keys(aswNow, aswAfter), basKeys = keys(basNow, basAfter);
+  const riskTable = el("div", { class: "table-wrap" }, el("table", { class: "compact" },
+    el("thead", {}, el("tr", {}, ["", "Current", "Hedge", "Remaining"].map((h, i) => el("th", { class: i ? "" : "l" }, h)))),
+    el("tbody", {},
+      section(`Rates: ΔV for +1bp at each ${BK.code === "ctd" ? "CTD anchor" : "maturity"} (${ccy})`),
+      BK.labels.map((lab, k) => line(lab, R[k], left[k])),
+      line("Parallel +1bp", tot(R), tot(left), { bold: true }),
+      el("tr", {}, el("td", { class: "l muted" }, `Σ |ΔV| over ${BK.code === "ctd" ? "anchors" : "maturities"}`), el("td", { class: "muted" }, fmt.ccy(ccy, sumAbs(R))), el("td", {}, ""),
+        el("td", { class: "muted" }, fmt.ccy(ccy, sumAbs(left)))),
+      ...(B.implied !== "asw" ? [section("ASW: ΔV for +1bp of every ASW"),
+        ...(aswKeys.length ? aswKeys.map((k) => line(MARKETS.find((m) => m.code === k)?.label ?? k, aswNow[k] ?? 0, aswAfter[k] ?? 0)) : [el("tr", {}, el("td", { class: "l muted", colspan: 4 }, "none"))]),
+        aswKeys.length > 1 ? line("Total ASW", Object.values(aswNow).reduce((a, x) => a + x, 0), Object.values(aswAfter).reduce((a, x) => a + x, 0), { bold: true }) : null] : []),
+      section("Futures gross basis: ΔV for +1 tick"),
+      basKeys.length ? basKeys.map((k) => line(k, basNow[k] ?? 0, basAfter[k] ?? 0, { sub: `CTD ${U.futs[k.split(" ")[0]]?.ctd.name ?? ""}` }))
+        : el("tr", {}, el("td", { class: "l muted", colspan: 4 }, "none")),
+      basKeys.length > 1 ? line("Total basis", Object.values(basNow).reduce((a, x) => a + x, 0), Object.values(basAfter).reduce((a, x) => a + x, 0), { bold: true }) : null)));
+  const add = el("button", { class: "btn", disabled: legs.length ? null : true, onclick: () => {
+    const trade = uniqueTrade(`Hedge ${ccy} (${hedge.mode === "irs" ? "IRS" : "futures"})`);
+    book.push(...legs.map((l) => ({ ...l, trade })));
+    render();
+  } }, "Add hedge to portfolio");
+  hedgeBox.replaceChildren(controls,
+    el("div", { class: "grid cols-2", style: { alignItems: "start" } },
+      el("div", {}, el("h2", {}, "Suggested hedge"), table, el("div", { class: "row", style: { marginTop: "6px" } }, add)),
+      el("div", {}, el("h2", {}, "Risk: current, hedge, remaining"), riskTable)),
+    el("p", { class: "note" }, `Hedged on the buckets chosen above (${BK.code === "ctd" ? "futures CTD anchors" : "key rates"}). ` + (hedge.mode === "irs"
+      ? (BK.code === "ctd" ? "IRS: par swaps to each CTD's maturity, " : "IRS: one par swap at each key tenor with risk, ")
+        + "sized by least squares on the buckets (rounded to 1mm). Hedging bonds with IRS leaves ASW risk: the bonds' "
+        + "spread to swaps is no longer offset by anything."
+      : "Futures: lots from an exact least-squares fit of the key-rate risk, each contract's risk sitting at its CTD's maturity (DV01 per lot = "
+        + "CTD DV01 / CF), rounded to whole lots. The whole risk is hedged in one go; what is left cannot be reduced with these contracts. "
+        + "Futures add gross basis risk: +1 tick of basis lowers each contract by tick / CF.")));
 }
 
 // One table, maturities down the side: a column per curve, grouped into government yield, swap and ASW, then
 // per currency the sum across every curve (all of them +1bp at that maturity).
-function curveTable(groups, B) {
+function curveTable(groups, B, BK) {
   const cols = groups.flatMap((g) => g.keys.map((k, j) => ({ group: g.label, groupImplied: g.implied, groupNote: g.groupNote, first: j === 0, label: g.name(k), colNote: g.note?.(k), ccy: g.ccy(k),
-    rate: g.id !== "asw", implied: g.implied && !(g.live?.(k)), kr: g.store[k]?.kr ?? KR.map(() => 0) })));
+    rate: g.id !== "asw", implied: g.implied && !(g.live?.(k)), kr: g.store[k]?.kr ?? BK.labels.map(() => 0) })));
   const ccys = [...new Set(cols.map((c) => c.ccy))];
   const all = ccys.map((c, j) => ({ group: "Total", groupNote: 3, first: j === 0, label: "Rates", ccy: c, total: true,
-    kr: KR.map((_, k) => cols.filter((x) => x.ccy === c && x.rate).reduce((a, x) => a + x.kr[k], 0)) }));
+    kr: BK.labels.map((_, k) => cols.filter((x) => x.ccy === c && x.rate).reduce((a, x) => a + x.kr[k], 0)) }));
   const shown = [...cols, ...all];
   const scale = Math.max(1, ...cols.flatMap((c) => c.kr.map(Math.abs)));
   const sep = (c) => (c.first ? { borderLeft: "1px solid #3a3a3a" } : null);
@@ -282,9 +473,9 @@ function curveTable(groups, B) {
     el("thead", {},
       el("tr", {}, el("th", { class: "l" }, ""), spans.map((g) => el("th", { colspan: g.n, class: "th-group", style: { borderLeft: "1px solid #3a3a3a", ...(g.implied ? { color: "#6a6a6a" } : {}) } },
         g.label, sup(g.note), g.implied ? sup(4) : null))),
-      el("tr", {}, el("th", { class: "l" }, "Maturity"), shown.map((c) => el("th", { style: { ...sep(c), ...(c.implied ? { color: "#6a6a6a" } : {}) } }, c.label, sup(c.colNote), el("div", { class: "unit" }, c.ccy))))),
+      el("tr", {}, el("th", { class: "l" }, BK.code === "ctd" ? "CTD anchor" : "Maturity"), shown.map((c) => el("th", { style: { ...sep(c), ...(c.implied ? { color: "#6a6a6a" } : {}) } }, c.label, sup(c.colNote), el("div", { class: "unit" }, c.ccy))))),
     el("tbody", {},
-      KR.map((m, k) => el("tr", {}, el("td", { class: "l" }, `${m}Y`), shown.map((c) => cell(c.kr[k], c, c.total)))),
+      BK.labels.map((m, k) => el("tr", {}, el("td", { class: "l", title: BK.titles?.[k] ?? null, style: { whiteSpace: "nowrap" } }, m), shown.map((c) => cell(c.kr[k], c, c.total)))),
       el("tr", { style: { borderTop: "1px solid #3a3a3a" } }, el("td", { class: "l" }, el("b", {}, "Total")),
         shown.map((c) => cell(c.kr.reduce((a, b) => a + b, 0), c, true))))));
   const notes = [
@@ -293,6 +484,9 @@ function curveTable(groups, B) {
     "Total: every government and IRS curve +1bp at that maturity together, spreads unchanged, summed per currency. The same in every risk basis.",
     `Grey: implied in the ${B.label} basis (${B.note}), so it carries no risk of its own.`
       + (B.code === "GA" ? " SONIA has no government curve here and keeps its IRS risk." : ""),
+    ...(BK.code === "ctd" ? ["CTD anchors: each position's risk is split between the two futures CTDs either side of its maturity (all to the nearest "
+      + "beyond the ends), so each row is the risk that contract hedges. USD and GBP use the Treasury contracts' CTDs (TU, FV, TY, UXY, US, WN), "
+      + "EUR the German ones (DU, OE, RX, UB). Hover a row for the CTDs and their maturities."] : []),
   ];
   return el("div", {}, table, el("ol", { class: "small muted", style: { margin: "6px 0 0", paddingLeft: "18px" } }, notes.map((n) => el("li", {}, n))));
 }
@@ -320,7 +514,7 @@ function tradeRow(name, pos) {
   nameIn.addEventListener("change", () => { const n = nameIn.value.trim() || name; const t = n === name ? name : uniqueTrade(n); book.forEach((l) => { if (l.trade === name) l.trade = t; }); render(); });
   return el("tr", { class: "trade-row", style: { background: "rgba(255, 170, 0, 0.06)", borderTop: "1px solid #3a3a3a", ...(on ? {} : { opacity: 0.45 }) } },
     el("td", { class: "l" }, inc),
-    el("td", { class: "l", colspan: 10 }, el("span", { class: "row", style: { gap: "8px" } }, nameIn,
+    el("td", { class: "l", colspan: 11 }, el("span", { class: "row", style: { gap: "8px" } }, nameIn,
       el("span", { class: "muted small" }, `${legs.length} leg${legs.length === 1 ? "" : "s"}${on < legs.length ? ` · ${on} in the risk` : ""} · net`))),
     el("td", {}, ccys.map((c, k) => el("div", { class: net[c].dv >= 0 ? "pos" : "neg" }, fmt.ccy(c, net[c].dv)))),
     el("td", {}, ccys.map((c) => el("div", {}, net[c].mv ? fmt.ccy(c, net[c].mv) : "–"))),

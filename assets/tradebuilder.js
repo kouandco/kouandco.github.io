@@ -109,15 +109,16 @@ export function buildTrade(U, spec) {
 }
 
 // The builder panel. onCreate({legs, weights, name}) is called with the built trade.
-export function tradeBuilder(U, { onCreate, onCancel, createLabel = "Add" }) {
-  const spec = { type: "basis2", market: "UST", side: 1, size: 10, sizeMode: "notional" };
+// bondSize: default notional (mm) of a bond-led trade; lots: default size of a futures-led trade.
+export function tradeBuilder(U, { onCreate, onCancel, createLabel = "Add", bondSize = 10, lots = 100 }) {
+  const spec = { type: "basis2", market: "UST", side: 1, size: bondSize, sizeMode: "notional" };
   const box = el("div", { class: "panel", style: { margin: "8px 0", borderColor: "#5c4a14" } });
   const resetMain = () => {
     const T = TRADE_TYPES.find((x) => x.code === spec.type);
     if (T.main === "bond") spec.main = nearestBond(U, spec.market, spec.type.startsWith("curve2") ? 5 : 9).id;
     else spec.main = (family(U, spec.market, FAMILY).find((f) => f.market === spec.market) ?? futsFor(U, spec.market)[0]).code;
-    if (T.main === "fut" && spec.sizeMode === "notional") spec.size = 100;
-    if (T.main === "bond" && spec.sizeMode === "notional" && spec.size >= 50) spec.size = 10;
+    if (T.main === "fut" && spec.sizeMode === "notional") spec.size = lots;
+    if (T.main === "bond" && spec.sizeMode === "notional" && spec.size === lots) spec.size = bondSize;
     resetHedges();
   };
   const resetHedges = () => { spec.hedges = defaultHedges(U, spec); spec.w1 = null; };
